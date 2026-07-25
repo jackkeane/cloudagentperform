@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  api:
+    build: .
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8080
+    ports: ["8080:8080"]
+    environment:
+      CAP_REDIS_URL: redis://redis:6379/0
+      CAP_DB_PATH: /data/cap.db
+      CAP_ARTIFACTS_DIR: /data/artifacts
+    volumes: ["capdata:/data"]
+    depends_on: [redis]
+  worker:
+    build: .
+    command: python -m worker.main
+    environment:
+      CAP_REDIS_URL: redis://redis:6379/0
+      CAP_DB_PATH: /data/cap.db
+      CAP_ARTIFACTS_DIR: /data/artifacts
+      CAP_SANDBOX_IMAGE: cap-sandbox
+      CAP_FIXTURE_DIR: /app/fixtures/demo-repo
+      CAP_TRAJECTORY: /app/fixtures/trajectories/golden_todo_scan.json
+      CAP_LEASE_TTL: ${CAP_LEASE_TTL:-15}
+      CAP_STEP_DELAY_MS: ${CAP_STEP_DELAY_MS:-800}
+      LLM_MODE: ${LLM_MODE:-mock}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-Qwen3-14B-AWQ}
+    volumes:
+      - capdata:/data
+      # Trusted platform side ONLY. The socket is root-equivalent on the
+      # host and must NEVER be mounted into sandbox containers (spec 4.2;
+      # tradeoff acknowledged in ARCHITECTURE.md / DECISIONS.md Q1).
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [redis]
+volumes:
+  capdata:

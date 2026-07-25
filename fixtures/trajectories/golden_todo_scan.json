@@ -1,0 +1,21 @@
+{
+  "recorded_from": {"model": "synthetic-provisional", "base_url": "",
+                    "date": "2026-07-25", "fixture_sha256": "UNPINNED"},
+  "steps": [
+    {"tool_calls": [{"name": "list_dir", "arguments": {"path": "."}}],
+     "text": null},
+    {"tool_calls": [{"name": "bash",
+                     "arguments": {"command": "grep -rn TODO ."}}],
+     "text": null},
+    {"tool_calls": [{"name": "read_file", "arguments": {"path": "app.py"}}],
+     "text": null},
+    {"tool_calls": [{"name": "read_file", "arguments": {"path": "utils.py"}}],
+     "text": null},
+    {"tool_calls": [{"name": "write_file",
+                     "arguments": {"path": "output/report.md",
+                                   "content": "# TODO Report\n\nScanned the repository for TODO comments. Found **5**:\n\n| # | File | Line | Content |\n|---|------|------|---------|\n| 1 | app.py | 4 | TODO: validate input |\n| 2 | app.py | 9 | TODO: add logging |\n| 3 | utils.py | 2 | TODO: handle empty list |\n| 4 | README.md | 5 | TODO: write usage docs |\n| 5 | config.yaml | 4 | TODO: move secrets to env |\n"}}],
+     "text": null},
+    {"tool_calls": [],
+     "text": "Scanned the repository and found 5 TODO comments across 4 files. Full report written to output/report.md."}
+  ]
+}

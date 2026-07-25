@@ -1,0 +1,15 @@
+{
+  "recorded_from": {"model": "synthetic-test", "base_url": "",
+                    "date": "2026-07-25", "fixture_sha256": "UNPINNED"},
+  "steps": [
+    {"tool_calls": [{"name": "bash",
+                     "arguments": {"command": "grep -rn TODO ."}}],
+     "text": null},
+    {"tool_calls": [{"name": "write_file",
+                     "arguments": {"path": "output/report.md",
+                                   "content": "# TODO Report\n\n5 TODOs found.\n"}}],
+     "text": null},
+    {"tool_calls": [],
+     "text": "Scanned the repo and wrote output/report.md with 5 TODOs."}
+  ]
+}

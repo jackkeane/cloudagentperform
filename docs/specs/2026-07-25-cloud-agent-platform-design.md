@@ -152,10 +152,10 @@ ADR（3 个）：① 本地可跑的 demo 为什么代表云平台；② SSE vs 
 
 落后时的砍单顺序：UI（已默认降级）→ git_url（已默认设计项）→ 缩减文档篇幅；绝不砍 Docker 隔离、任务状态机、三个云行为。
 
-## 10. 开放问题（实现前解决）
+## 10. 开放问题（已全部实测关闭，2026-07-25）
 
-1. 用户本地 vLLM 启动参数实测：tool-call parser 名（hermes 或 qwen3 系）、endpoint、模型名、`--max-model-len`。**已降级为非阻塞**：若实测不顺，fixture 用任意 OpenAI 兼容端点录制（见 §4.3）
-2. `extra_hosts: host-gateway` 在用户 WSL2 docker 环境实测连通宿主 vLLM
+1. ✅ **vLLM 启动参数实测通过**：`vllm serve Qwen/Qwen3-14B-AWQ --port 8000 --enforce-eager --max-model-len 8192 --gpu-memory-utilization 0.55 --enable-auto-tool-choice --tool-call-parser hermes --served-model-name Qwen3-14B-AWQ`。探针确认 `finish_reason=tool_calls`、`arguments` 为合法 JSON；对照组：缺 flag 时 vLLM 返回 400（`"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`）——两条记录均入 VERIFICATION.md。注：未配 reasoning parser，`<think>` 思考文本留在 `content`（事件流将如实展示；视录制效果可选 `--reasoning-parser qwen3` 分离，非必须）
+2. ✅ **容器→宿主连通性**：容器内经 `--add-host=host.docker.internal:host-gateway` 访问宿主 `:8000/v1/models` 成功（WSL2 docker-ce 实测一次通过）
 
 ## 修订记录
 

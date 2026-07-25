@@ -23,7 +23,9 @@ services:
       CAP_FIXTURE_DIR: /app/fixtures/demo-repo
       CAP_TRAJECTORY: /app/fixtures/trajectories/golden_todo_scan.json
       CAP_LEASE_TTL: ${CAP_LEASE_TTL:-15}
-      CAP_STEP_DELAY_MS: ${CAP_STEP_DELAY_MS:-800}
+      # Demo pacing only: mock replay would finish in milliseconds, which is
+      # both unwatchable and too fast to kill a worker mid-run (behavior 2).
+      CAP_STEP_DELAY_MS: ${CAP_STEP_DELAY_MS:-2500}
       LLM_MODE: ${LLM_MODE:-mock}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:8000/v1}
       LLM_API_KEY: ${LLM_API_KEY:-}

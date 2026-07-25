@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -12,7 +13,33 @@ SYSTEM_PROMPT = (
     "Linux sandbox. The project to work on is in /workspace (your cwd). "
     "Use the provided tools to complete the user's task. Write deliverable "
     "files under /workspace/output/. When the task is complete, reply with "
-    "a short final summary and no tool calls.")
+    "a short final summary and no tool calls.\n"
+    "Rules:\n"
+    "1. Make one tool call at a time and wait for its result before you "
+    "decide the next step.\n"
+    "2. Tool calls do not share a shell session: environment variables, "
+    "`cd` and command output never carry over from one call to the next. "
+    "Never put $VAR or backticks in write_file content hoping an earlier "
+    "command filled them in — write the literal text you want to appear in "
+    "the file, copied from a tool result you have already seen.\n"
+    "3. If a command exits non-zero or prints nothing, do not repeat it "
+    "unchanged. Run a simpler variant (for example plain "
+    "`grep -rn TODO .`) to find out why.\n"
+    "4. Keep reasoning brief; the context window is small.")
+
+# Reasoning models (Qwen3, DeepSeek-R1, ...) emit <think> blocks that are
+# worth nothing to the next turn but cost hundreds of tokens each. Drop them
+# before the message goes back into the context. Also drops an unterminated
+# trailing block, which is how a truncated reasoning turn arrives.
+_THINK = re.compile(r"<think>.*?</think>\s*|<think>.*\Z", re.DOTALL)
+
+_NUDGE = ("Your last reply contained no visible answer and no tool call. "
+          "Either call a tool to make progress, or state the final result "
+          "in plain text.")
+
+
+def strip_reasoning(text: str | None) -> str:
+    return _THINK.sub("", text or "").strip()
 
 
 @dataclass
@@ -50,20 +77,25 @@ def run_agent(prompt, sandbox, llm, emit, should_stop, *, max_steps=20,
         for k in usage_total:
             usage_total[k] += result.usage.get(k, 0)
 
+        text = strip_reasoning(result.text)
+
         if not result.tool_calls:
-            text = result.text or ""
+            if not text:  # reasoning-only turn: not an answer, don't call it one
+                messages.append({"role": "assistant", "content": ""})
+                messages.append({"role": "user", "content": _NUDGE})
+                continue
             emit(EV_MESSAGE, {"text": text, "final": True})
             messages.append({"role": "assistant", "content": text})
             return Outcome(SUCCEEDED, None, text, usage_total, messages)
 
-        messages.append({"role": "assistant", "content": result.text,
+        messages.append({"role": "assistant", "content": text,
                          "tool_calls": [
                              {"id": c.id, "type": "function", "function": {
                                  "name": c.name,
                                  "arguments": json.dumps(c.arguments or {})}}
                              for c in result.tool_calls]})
-        if result.text:
-            emit(EV_MESSAGE, {"text": result.text, "final": False})
+        if text:
+            emit(EV_MESSAGE, {"text": text, "final": False})
 
         for call in result.tool_calls:
             check()

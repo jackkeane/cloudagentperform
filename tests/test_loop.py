@@ -83,6 +83,41 @@ def test_llm_error_maps_to_model_error():
     assert out.status == FAILED and out.reason == R_MODEL
 
 
+def test_reasoning_blocks_are_stripped_before_they_enter_the_context():
+    events, emit = collect()
+    thinking = ChatResult(
+        text="<think>long chain of thought</think>I will grep first.",
+        usage={}, tool_calls=[ToolCall(id="c1", name="bash",
+                                       arguments={"command": "ls"})])
+    out = run_agent("t", FakeSandbox(),
+                    ScriptedLLM([thinking, _final("<think>more</think>done")]),
+                    emit, lambda: None)
+    assert out.status == SUCCEEDED and out.summary == "done"
+    assistant = [m for m in out.transcript if m["role"] == "assistant"]
+    assert assistant[0]["content"] == "I will grep first."
+    assert all("<think>" not in (m.get("content") or "") for m in assistant)
+    assert all("<think>" not in p.get("text", "") for t, p in events
+               if t == EV_MESSAGE)
+
+
+def test_unterminated_reasoning_block_is_dropped_too():
+    _, emit = collect()
+    out = run_agent("t", FakeSandbox(),
+                    ScriptedLLM([_final("<think>cut off mid thought")]),
+                    emit, lambda: None, max_steps=1)
+    assert out.status == FAILED and out.reason == R_MAX_STEPS
+
+
+def test_empty_final_answer_is_nudged_instead_of_declared_success():
+    _, emit = collect()
+    llm = ScriptedLLM([_final("<think>\n\n"), _final("here is the report")])
+    out = run_agent("t", FakeSandbox(), llm, emit, lambda: None)
+    assert out.status == SUCCEEDED and out.summary == "here is the report"
+    nudges = [m for m in out.transcript
+              if m["role"] == "user" and "no visible answer" in m["content"]]
+    assert len(nudges) == 1
+
+
 def test_should_stop_raises_stopped_with_reason():
     _, emit = collect()
     with pytest.raises(Stopped) as exc:

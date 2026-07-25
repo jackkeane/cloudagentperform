@@ -5,4 +5,4 @@ data/
 .venv/
 demo-logs/
 .superpowers/
-TASK.md
+TASK*.md

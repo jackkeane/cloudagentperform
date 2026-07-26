@@ -1,8 +1,21 @@
 # tests/test_record.py
+import pytest
+
+from agent.llm import ChatResult, ToolCall
 from agent.mock import MockProvider, fixture_sha256
 from tests.fakes import ScriptedLLM
 from tests.test_loop import _call, _final
 from worker.record import RecordingLLM, to_trajectory
+
+def test_recording_refuses_malformed_tool_calls():
+    bad = ChatResult(text=None, usage={},
+                     tool_calls=[ToolCall(id="c1", name="bash",
+                                          arguments=None,
+                                          parse_error="bad json")])
+    rec = RecordingLLM(ScriptedLLM([bad]))
+    with pytest.raises(SystemExit, match="malformed tool_call"):
+        rec.chat([], tools=[])
+    assert rec.steps == []   # nothing captured from a dirty run
 
 def test_recording_llm_captures_steps_passthrough():
     inner = ScriptedLLM([_call("bash", {"command": "ls"}), _final("done")])

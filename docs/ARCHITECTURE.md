@@ -151,6 +151,6 @@ queued ──claim (CAS)──> running ──finish (CAS)──> succeeded | fa
 ### 加一个 sandbox provider
 
 1. 实现 `sandbox/provider.py` 的两个抽象类：`SandboxProvider`（`start(task_id, attempt, workspace_src)` / `gc(active_task_ids)` / `remove_for_task(task_id)`）与 `SandboxHandle`（`exec` / `write_file` / `read_file` / `download_artifacts` / `destroy` / `oom_killed`）。
-2. 在 `worker/main.py: main()` 里替换 `DockerSandboxProvider` 的构造。注意一处已知的死配置：`core/config.py` 里已有 `sandbox_backend` 字段（环境变量 `CAP_SANDBOX`），但 `worker/main.py` 目前**没有**按它分派，而是直接硬编码了 Docker 实现。加第二个 provider 时应顺手把这个分派补上。
+2. 在 `worker/main.py: main()` 里加分派分支。当前 `sandbox_backend`（环境变量 `CAP_SANDBOX`）只认 `docker`，配成其它值时 worker 启动即报错退出并指向本节——fail fast，不猜测；加第二个 provider 时把该守卫改成真正的分派即可。
 3. 语义约束（不满足会破坏现有验收）：`start` 必须交付干净的 `/workspace` 与 `/workspace/output/`；`destroy` 必须幂等且在任何路径下可调用；实例必须带上 `cap.task_id` 与 `cap.attempt` 标识，否则 `gc` 与并发隔离的验收（数 label）失效；`exec` 在实例已消失时要抛 `SandboxDied`，这是取消与超时的中断机制所依赖的信号。
 4. 测试模板：`tests/test_docker_sandbox.py` 是真起容器的集成测试。

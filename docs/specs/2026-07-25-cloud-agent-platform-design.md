@@ -1,6 +1,6 @@
 # Cloud Agent Platform — 设计规格
 
-日期：2026-07-25 ｜ 版本：v1.2（v1.1 经独立评审、v1.2 经聚焦 grilling 修订，见文末修订记录）｜ 状态：已确认（2026-07-25）｜ 语言约定：文档中文，代码/标识符/commit 英文
+日期：2026-07-25 ｜ 版本：v1.3（v1.1 经独立评审、v1.2 经聚焦 grilling、v1.3 为实现期勘误，见文末修订记录）｜ 状态：已确认（2026-07-25）｜ 语言约定：文档中文，代码/标识符/commit 英文
 
 ## 1. 背景与约束
 
@@ -36,7 +36,7 @@ flowchart LR
     W --> L[LLMProvider<br/>vLLM / Mock]
 ```
 
-四个组件独立进程，只通过 Redis / SQLite / HTTP 交互。API 无状态可横向扩展，worker 可加副本。SQLite 开 WAL + busy_timeout；写入纪律：API 只写任务提交行，某任务的事件只由持有其 lease 的 worker 写入（单写者，无跨进程行争用）；ARCHITECTURE.md 映射到 Postgres。
+四个组件独立进程，只通过 Redis / SQLite / HTTP 交互。API 无状态可横向扩展，worker 可加副本。SQLite 开 WAL + busy_timeout；写入纪律：任一时刻某任务只有一个合法属主写它——排队中是 API（取消排队任务时 `cancel_queued` 以 `status=queued` 的 CAS 为属主校验，此时尚无 lease），运行中是持有其 lease 的 worker（终态写入以 `(status=running, attempt)` CAS 守护）；无跨进程行争用；ARCHITECTURE.md 映射到 Postgres。
 
 ## 4. 组件设计
 
@@ -68,7 +68,7 @@ flowchart LR
 - 工具调用：**钉死 native `tool_calls`**（OpenAI 协议标准件，任意兼容端点即插即用；prompt-JSON 备选删除不建）。本地 vLLM 属部署侧配置：启动参数需含 `--enable-auto-tool-choice --tool-call-parser <实测值>`（`hermes` 或 qwen3 系，随 vLLM 版本变化）；若本地 parser 实测不顺，fixture 改用任意 OpenAI 兼容端点录制——本地 Qwen3 是首选项而非关键路径。README 注明所用权重与 `--max-model-len`（Qwen3-14B 原生 32K，AWQ 部署可能配置更短）
 - **`MockProvider` 回放语义（钉死）**：回放 = 对着**哈希钉扎的 fixture** 录制的一次真实运行轨迹，按 step 顺序吐出 `tool_calls`/文本，不依据实时 tool result 重新决策；fixture 内容 + 确定性命令保证轨迹可重现；UI/CLI/README 明确标注"回放模式（录制自真实 Qwen3 运行）"，不包装成实时推理。评审无 GPU 时跑通的是**平台**（队列/沙箱/SSE 全真实），模型智能由录制 transcript + 真实模式录屏证明。`demo.sh` 默认 mock，`--real` 显式切换（无探测、无自动回落）；录制入口（`--record`：真实模式运行并存轨迹）与原始 transcript 一并入库，作为回放真实性证据
 - **运行来源外显（不可伪装原则）**：每次运行的 `job.started` 事件 payload 携带 `llm: {mode: mock|real, model, base_url}`（永不含 key）；CLI banner、transcript 头、demo.sh 开场打印同一信息。mock 额外标注录制来源（录制模型/日期/fixture 哈希）；real 如实报告 base_url 与模型名，不猜测端点品牌（vLLM / Ollama / 云端点由 base_url 自证）
-- 工具输出截断**按工具类型**：`read_file` 保头部+行号（TODO 扫描要的是文件前部），`bash` 保尾部，上限各 ~50KB
+- 工具输出截断**按工具类型**：`read_file` 保头部（TODO 扫描要的是文件前部；实现取字节头部、不加行号，行号是无谓的 token 开销），`bash` 保尾部（报错通常在尾部），上限各 ~50KB
 - 配置与密钥：`base_url`/模型名/超时全部经 compose 环境变量注入；事件流与 transcript 中禁止出现密钥类环境变量值
 
 ### 4.4 Agent 循环（考察点③）
@@ -154,11 +154,12 @@ ADR（3 个）：① 本地可跑的 demo 为什么代表云平台；② SSE vs 
 
 ## 10. 开放问题（已全部实测关闭，2026-07-25）
 
-1. ✅ **vLLM 启动参数实测通过**：`vllm serve Qwen/Qwen3-14B-AWQ --port 8000 --enforce-eager --max-model-len 8192 --gpu-memory-utilization 0.55 --enable-auto-tool-choice --tool-call-parser hermes --served-model-name Qwen3-14B-AWQ`。探针确认 `finish_reason=tool_calls`、`arguments` 为合法 JSON；对照组：缺 flag 时 vLLM 返回 400（`"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`）——两条记录均入 VERIFICATION.md。注：未配 reasoning parser，`<think>` 思考文本留在 `content`（事件流将如实展示；视录制效果可选 `--reasoning-parser qwen3` 分离，非必须）
+1. ✅ **vLLM 启动参数实测通过**：`vllm serve Qwen/Qwen3-14B-AWQ --port 8000 --enforce-eager --max-model-len 8192 --gpu-memory-utilization 0.55 --enable-auto-tool-choice --tool-call-parser hermes --served-model-name Qwen3-14B-AWQ`。探针确认 `finish_reason=tool_calls`、`arguments` 为合法 JSON；对照组：缺 flag 时 vLLM 返回 400（`"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set`）——两条记录均入 VERIFICATION.md。注：未配 reasoning parser，`<think>` 思考文本留在 `content`。[v1.3 更新] 首次真实录制因此失败（每步 900+ token 的思考文本回灌 8k 上下文），现由循环在 assistant 文本进入上下文与事件流前剥离（`agent/loop.py` 的 `strip_reasoning`），无需 reasoning parser；教训详见 `docs/AI-USAGE.md` 第四节
 2. ✅ **容器→宿主连通性**：容器内经 `--add-host=host.docker.internal:host-gateway` 访问宿主 `:8000/v1/models` 成功（WSL2 docker-ce 实测一次通过）
 
 ## 修订记录
 
+- v1.3（2026-07-26）：实现期勘误，代码为准、spec 跟进。三处：单写者表述精确化为"属主写入"（API 的 `cancel_queued` 也合法写事件，属主校验是 `status=queued` 的 CAS）；`read_file` 截断为纯头部、不加行号；`<think>` 文本改由循环剥离（首次真实录制失败的直接产物）。
 - v1.2（2026-07-25）：聚焦 grilling 后修订（Q&A 存档见 `docs/DECISIONS.md` Q2–Q8）。主要变更：worker reconcile（Redis 视为可重建缓存）+ 对应集成测试；tool-calls 钉死 native、删除 prompt-JSON 备选；LLM 配置三元组与评审自带 key 的 `--real` 通道 + preflight；`--record` 录制入口与原始 transcript 入库；运行来源外显（mode/model/base_url 进 `job.started` 与 CLI banner，mock 标注录制来源）；无自动回落。
 - v1.1（2026-07-25）：经 grok-4.5 独立评审后修订。主要变更：补 `running→queued` 回收转移与 attempt 级重跑语义；artifact 先晋升后销毁；Mock 回放语义钉死（step 锁定 + fixture 哈希钉扎 + 明确标注）；lease 即并发槽 + token CAS + 孤儿容器 label GC；SSE 交接竞态与 CLI 断点续传验收；沙箱加固补 no-new-privileges/非root/pids-limit/默认网络none；截断分工具类型；UI 与 git_url 预降级；SQLite 写入纪律；事件 schema 刚性化；ADR 压缩至 3 个。
 - v1.0（2026-07-25）：初版（brainstorming 产出）。

@@ -3,7 +3,7 @@
 每条风险假设对应：假设本身、具体检查、可复现命令。所有测试命令的前置条件：
 
 ```bash
-uv venv --python 3.12 && uv pip install -e '.[dev]'      # 或 pip install -e '.[dev]'
+uv venv --python 3.12 && uv pip install -r requirements.txt  # 锁定版依赖；或 uv/pip install -e '.[dev]'
 docker run -d --name cap-redis -p 6379:6379 redis:7-alpine   # 测试用 Redis（db 15）
 docker build -f sandbox.Dockerfile -t cap-sandbox .          # 沙箱镜像（docker 标记的测试用）
 ```

@@ -21,11 +21,19 @@ docker compose down -v    # 清理
 
 零 GPU、零 API key、确定性可复现。全绿时依次打印 `GOLDEN OK` / `B1 OK` / `B2 OK` / `B3 OK` / `ALL CLOUD BEHAVIORS PASSED`，任一断言失败即以非零退出码停下。平台起来后浏览器打开 `http://localhost:8080` 是同一条实时事件流的单页 Web UI（自包含单文件，无构建、无外部依赖）。
 
+### 本地开发环境（uv）
+
+跑测试或改代码时建议用 [uv](https://docs.astral.sh/uv/) 建独立 venv。依赖的唯一事实源是 `pyproject.toml`；`requirements.txt` 是它的锁定视图，由 `uv pip compile pyproject.toml --extra dev --universal` 生成（文件头带生成命令，可复现），把含传递依赖在内的全部版本钉死：
+
 ```bash
-pip install -e '.[dev]' && python -m pytest    # 86 passed，含真起容器的沙箱集成测试
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install -r requirements.txt
+python -m pytest          # 86 passed，含真起容器的沙箱集成测试
 ```
 
-测试的前置：Python ≥ 3.12、本机 Docker、以及 `localhost:6379` 的 Redis（一条命令：`docker run -d --name cap-redis -p 6379:6379 redis:7-alpine`；完整前置见 `docs/VERIFICATION.md` 开头）。只跑 `./demo.sh` 不需要这些，Docker 就够。
+没有 uv 时传统方式等价：`python3.12 -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'`。
+
+测试的其余前置：本机 Docker、`localhost:6379` 的 Redis（一条命令：`docker run -d --name cap-redis -p 6379:6379 redis:7-alpine`；完整前置见 `docs/VERIFICATION.md` 开头）。只跑 `./demo.sh` 不需要这些，Docker 就够。
 
 ## 演示里能看到什么
 
@@ -91,6 +99,34 @@ LLM_API_KEY=sk-... \
 4. **不伪装**。CLI 横幅、`job.started` 事件 payload、`demo.sh` 开场三处同时打印 mode；mock 额外标注录制来源。
 
 以上四条即 `docs/DECISIONS.md` Q7 定下的证据链。
+
+## 云平台上线教程（阿里云 ECS / AWS EC2）
+
+「云」在本项目里是架构属性（`docs/ARCHITECTURE.md` 的部署映射表），最小落地是把同一份 compose 栈原样搬上任意一台云 VM——本节在国内外各给一条控制台路径，命令完全相同。诚实声明：本次交付未实际租用云主机，本节是按两家当前控制台流程整理的配置教程；栈本身与本地 `./demo.sh` 是同一份，云上唯一的新变量只有装 Docker 和网络入口。
+
+**通用步骤**（两家一致；Ubuntu 24.04，2 vCPU / 4 GB 起步）：
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh     # 装 Docker（自带 compose 插件）
+sudo usermod -aG docker $USER                   # 然后退出并重新 SSH 登录，使 docker 组生效
+git clone https://github.com/jackkeane/cloudagentperform.git && cd cloudagentperform
+./demo.sh                                       # 首次会构建镜像；全绿即上线成功
+```
+
+平台无鉴权（`docs/LIMITATIONS.md` 第 6 条），**不要把 8080 直接开到公网**。看 Web UI 用 SSH 隧道：本地执行 `ssh -L 8080:localhost:8080 <user>@<公网IP>`，浏览器开 `http://localhost:8080`。确需公网演示时，安全组入方向只对你自己的出口 IP 放行 8080。
+
+**阿里云 ECS**：
+
+- 控制台 → ECS → 自定义购买：镜像选 Ubuntu 24.04 64 位，规格 `ecs.e-c1m2.large`（2 vCPU / 4 GB，经济型够用），按量付费，安全组保持默认（只放 22/SSH）。
+- 大陆地域对 Docker 官方源与 Docker Hub 的连通性不稳：装 Docker 改用脚本自带的镜像参数 `curl -fsSL https://get.docker.com | sudo sh -s -- --mirror Aliyun`；拉镜像超时则在 `/etc/docker/daemon.json` 配镜像加速器（控制台「容器镜像服务 → 镜像工具 → 镜像加速器」），或直接选香港地域绕开。
+- `--real` 模式在大陆直连不了 OpenAI 系端点，建议 DeepSeek：`LLM_BASE_URL=https://api.deepseek.com/v1 LLM_MODEL=deepseek-chat LLM_API_KEY=sk-... ./demo.sh --real`。
+
+**AWS EC2**：
+
+- Console → EC2 → Launch instance：AMI 选 Ubuntu Server 24.04 LTS，实例类型 `t3.medium`（2 vCPU / 4 GB），密钥对登录，安全组默认只放 22/SSH。
+- 无镜像源问题，通用步骤原样执行；`--real` 填任何 OpenAI 兼容端点即可。
+
+两条路径跑的是同一份栈、同一条命令——部署映射表想说明的正是这一点：demo 在笔记本上与在云 VM 上跑通是同一件事。真正跨机扩展（多 worker 主机、Postgres、远程沙箱）的触发条件与改动点见 `docs/ARCHITECTURE.md`。
 
 ## 诚实报告
 

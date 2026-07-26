@@ -4,7 +4,7 @@
 
 ```bash
 uv venv --python 3.12 && uv pip install -r requirements.txt  # 锁定版依赖；或 uv/pip install -e '.[dev]'
-docker run -d --name cap-redis -p 6379:6379 redis:7-alpine   # 测试用 Redis（db 15）
+docker run -d --name cap-redis -p 6379:6379 redis:7-alpine   # 测试 Redis（db 15，会清空）；或 sudo apt install redis-server
 docker build -f sandbox.Dockerfile -t cap-sandbox .          # 沙箱镜像（docker 标记的测试用）
 ```
 

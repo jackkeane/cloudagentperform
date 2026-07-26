@@ -33,7 +33,20 @@ python -m pytest          # 86 passed，含真起容器的沙箱集成测试
 
 没有 uv 时传统方式等价：`python3.12 -m venv .venv && source .venv/bin/activate && pip install -e '.[dev]'`。
 
-测试的其余前置：本机 Docker、`localhost:6379` 的 Redis（一条命令：`docker run -d --name cap-redis -p 6379:6379 redis:7-alpine`；完整前置见 `docs/VERIFICATION.md` 开头）。只跑 `./demo.sh` 不需要这些，Docker 就够。
+测试的其余前置：本机 Docker，以及**机器上要有一个 Redis 服务**监听 `localhost:6379`（测试用 db 15 并会清空它；compose 栈内的 Redis 是平台自己的、不发布端口，替代不了这台）。两种装法二选一：原生 `sudo apt install redis-server`（Ubuntu/WSL 下装完即自启），或容器 `docker run -d --name cap-redis -p 6379:6379 redis:7-alpine`。WSL2 + Docker Desktop 有个陷阱：若原生 Redis 已占住 6379，容器的端口映射会被静默遮蔽、实际连上的仍是原生那台——装一个就好，别两个都装。完整前置见 `docs/VERIFICATION.md` 开头。只跑 `./demo.sh` 不需要这些，Docker 就够。
+
+### 外部组件一览
+
+venv（Python 依赖，见上）与 `--real` 的 LLM 端点之外，本项目用到的全部外部组件如下——没有列出的就是不需要的：
+
+| 组件 | 何时需要 | 说明 |
+|---|---|---|
+| Docker（含 compose 插件） | 所有场景 | demo 全栈、测试中真起的沙箱容器、镜像构建。外部基础镜像只有 `python:3.12-slim` 与 `redis:7-alpine` 两个 |
+| bash + curl | 跑 `./demo.sh` | Linux/macOS 自带 |
+| Redis 服务（`localhost:6379`） | 仅宿主机跑 pytest | 需自装（上文两种装法二选一）。只跑 demo 不需要 |
+| OpenAI 兼容 LLM 端点 | 仅 `--real` | 本地 vLLM / DeepSeek / Ollama 任一；默认 mock 模式零依赖 |
+| SQLite | 无需安装 | Python 标准库 `sqlite3`，进程内库而非独立服务 |
+| Node / npm | 无需安装 | Web UI 是单文件静态页，零构建、零外部依赖 |
 
 ## 演示里能看到什么
 

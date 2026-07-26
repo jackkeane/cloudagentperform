@@ -29,6 +29,9 @@ def poll_once(store, bus, provider, llm_factory, cfg) -> bool:
     return True
 
 def make_llm_factory(cfg):
+    if cfg.llm_mode not in ("mock", "real"):  # typo must not pick a mode
+        raise SystemExit(f"unknown LLM_MODE {cfg.llm_mode!r};"
+                         " use 'mock' or 'real' (no silent fallback)")
     if cfg.llm_mode == "mock":
         from agent.mock import MockProvider
         return lambda: MockProvider(cfg.trajectory_path, cfg.fixture_dir)
@@ -40,6 +43,10 @@ def make_llm_factory(cfg):
 
 def main():
     cfg = load_config()
+    if cfg.sandbox_backend != "docker":  # seam is real, dispatch is honest
+        raise SystemExit(
+            f"unknown sandbox backend {cfg.sandbox_backend!r}; only 'docker'"
+            " is implemented (design-only alternatives: docs/LIMITATIONS.md)")
     store = TaskStore(cfg.db_path)
     bus = QueueBus(cfg.redis_url)
     from sandbox.docker_provider import DockerSandboxProvider

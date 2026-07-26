@@ -21,8 +21,9 @@ for i in $(seq 1 30); do
 done
 curl -fsS "$API/healthz" >/dev/null 2>&1 \
   || { echo "FAIL: API not healthy after 30s"; docker compose logs api 2>&1 | tail -20; exit 1; }
-grep -q synthetic fixtures/trajectories/golden_todo_scan.json \
-  && echo "WARN: provisional trajectory in use (record the real one: worker.record)"
+curl -fsS "$API/" | grep -q 'id="provenance"' \
+  || { echo "FAIL: web UI not served"; exit 1; }
+echo "== web UI: $API (open in a browser for the same live feed) =="
 
 echo "== golden demo: TODO scan =="
 TID=$(cli submit "Scan the repo for TODO comments and write output/report.md" --no-follow)

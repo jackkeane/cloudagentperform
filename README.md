@@ -4,6 +4,10 @@
 
 Python 3.12 / FastAPI / Redis / SQLite / Docker。不使用任何 agent 框架，循环本身是被考察的东西。
 
+![Web UI：--real 模式下真实 Qwen3-14B 运行的实时事件流，顶部为运行来源横幅](docs/webui-real-run.png)
+
+（截图为 `--real` 模式对本地 vLLM 的一次真实运行；默认 mock 模式的界面相同，横幅显示 `mode=mock model=replay:...`。）
+
 设计规格见 `docs/specs/`，架构与部署映射见 `docs/ARCHITECTURE.md`，取舍的原始推理见 `docs/DECISIONS.md`（Q1–Q8 是设计阶段的自我拷问记录，下文决策表逐条引用它）。难逆决策的 ADR 在 `docs/adr/`；每条风险假设的验证命令在 `docs/VERIFICATION.md`；诚实的边界清单在 `docs/LIMITATIONS.md`；考题要求的 AI 使用披露在 `docs/AI-USAGE.md`。
 
 ## Quickstart

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云端 Agent 平台</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #666666;
+    --panel: #f4f4f5; --border: #d8d8dc;
+    --accent: #2454c9; --ok: #1a7f37; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --fg: #e6e6e6; --muted: #9a9a9a;
+      --panel: #1e2126; --border: #33363c;
+      --accent: #6b9bff; --ok: #4fce6e; --err: #ff6b63;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1rem; background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 960px; margin-inline: auto;
+  }
+  h1 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+  .row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+  input[type=text] {
+    flex: 1; min-width: 12rem; padding: 0.5rem; font-size: 1rem;
+    background: var(--panel); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  button {
+    padding: 0.5rem 0.9rem; font-size: 0.95rem; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--fg);
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #provenance {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 0.85rem; padding: 0.5rem 0.7rem; border-radius: 4px;
+    background: var(--panel); border: 1px solid var(--border);
+    margin-bottom: 0.75rem; white-space: pre-wrap; word-break: break-all;
+  }
+  #meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
+  #log {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 0.85rem; line-height: 1.45; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem;
+    height: 46vh; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  }
+  .ev { padding: 0.1rem 0.2rem; border-left: 3px solid transparent; margin: 0.1rem 0; }
+  .ev-started { border-color: var(--accent); color: var(--accent); }
+  .ev-message { border-color: var(--muted); }
+  .ev-call { border-color: #b58900; }
+  .ev-result-ok { border-color: var(--ok); }
+  .ev-result-err { border-color: var(--err); color: var(--err); }
+  .ev-terminal-ok { border-color: var(--ok); color: var(--ok); font-weight: bold; }
+  .ev-terminal-err { border-color: var(--err); color: var(--err); font-weight: bold; }
+  h2 { font-size: 0.95rem; margin: 1rem 0 0.4rem; }
+  #artifacts { font-size: 0.9rem; }
+  #artifacts a { color: var(--accent); display: block; margin: 0.15rem 0; }
+  #artifacts .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>云端 Agent 平台 — 任务提交与实时事件流</h1>
+  <div class="row">
+    <input id="prompt" type="text" placeholder="输入自然语言任务，例如：扫描仓库中的 TODO 并生成 report.md">
+    <button id="submit-btn" class="primary">提交任务</button>
+    <button id="cancel-btn" disabled>取消任务</button>
+  </div>
+  <div id="meta">尚未提交任务</div>
+  <div id="provenance">运行来源：（等待 job.started 事件）</div>
+  <div id="log"></div>
+  <h2>产出文件</h2>
+  <div id="artifacts"><span class="empty">（任务结束后在此列出）</span></div>
+
+<script>
+(function () {
+  "use strict";
+  var promptEl = document.getElementById("prompt");
+  var submitBtn = document.getElementById("submit-btn");
+  var cancelBtn = document.getElementById("cancel-btn");
+  var metaEl = document.getElementById("meta");
+  var provEl = document.getElementById("provenance");
+  var logEl = document.getElementById("log");
+  var artEl = document.getElementById("artifacts");
+
+  var taskId = null;
+  var es = null;
+  var MAX_FIELD = 400; // truncate long tool text before it hits the DOM
+  function trunc(s) {
+    s = String(s == null ? "" : s);
+    return s.length > MAX_FIELD ? s.slice(0, MAX_FIELD) + " …[截断]" : s;
+  }
+
+  function appendLine(cls, text) {
+    var div = document.createElement("div");
+    div.className = "ev " + cls;
+    div.textContent = text;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setMeta(status) {
+    metaEl.textContent = "任务 " + taskId + " — 状态: " + status;
+  }
+
+  function renderProvenance(llm) {
+    var line = "mode=" + llm.mode + " model=" + llm.model +
+               " endpoint=" + (llm.base_url || "-");
+    if (llm.mode === "mock" && llm.recorded_at) {
+      line += " (recorded " + llm.recorded_at + ")";
+    }
+    provEl.textContent = "运行来源: " + line;
+  }
+
+  function loadArtifacts() {
+    fetch("/tasks/" + taskId + "/artifacts")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        artEl.innerHTML = "";
+        if (!data.artifacts || data.artifacts.length === 0) {
+          artEl.innerHTML = '<span class="empty">（本次运行无产出文件）</span>';
+          return;
+        }
+        data.artifacts.forEach(function (a) {
+          var link = document.createElement("a");
+          link.href = a.url;
+          link.textContent = "attempt " + a.attempt + " / " + a.name;
+          link.setAttribute("download", "");
+          artEl.appendChild(link);
+        });
+      })
+      .catch(function () {});
+  }
+
+  function handleTerminal(ok, ev) {
+    var p = ev.payload;
+    var cls = ok ? "ev-terminal-ok" : "ev-terminal-err";
+    var text = ok ? "== succeeded: " + trunc(p.summary || "")
+                  : "== " + p.status + ": reason=" + (p.reason || "");
+    appendLine(cls, text);
+    setMeta(p.status);
+    cancelBtn.disabled = true;
+    submitBtn.disabled = false;
+    if (es) { es.close(); es = null; }
+    loadArtifacts();
+  }
+
+  function onEvent(type, raw) {
+    var ev = JSON.parse(raw);
+    var p = ev.payload;
+    if (type === "job.started") {
+      renderProvenance(p.llm || {});
+      appendLine("ev-started", "* attempt " + p.attempt + " started [mode=" +
+                 (p.llm || {}).mode + " model=" + (p.llm || {}).model + "]");
+      setMeta("running");
+    } else if (type === "llm.message") {
+      appendLine("ev-message", "agent: " + trunc(p.text));
+    } else if (type === "tool.call") {
+      appendLine("ev-call", "-> " + p.name + " " +
+                 trunc(JSON.stringify(p.arguments || {})));
+    } else if (type === "tool.result") {
+      var ok = !!p.ok;
+      appendLine(ok ? "ev-result-ok" : "ev-result-err",
+                 "<- " + p.name + " [" + (ok ? "ok" : "ERR") + "] " +
+                 trunc(p.output));
+    } else if (type === "job.completed") {
+      handleTerminal(true, ev);
+    } else if (type === "job.failed") {
+      handleTerminal(false, ev);
+    } else {
+      appendLine("ev-message", "? " + type);
+    }
+  }
+
+  function connect(id) {
+    if (es) { es.close(); }
+    logEl.innerHTML = "";
+    provEl.textContent = "运行来源：（等待 job.started 事件）";
+    artEl.innerHTML = '<span class="empty">（任务结束后在此列出）</span>';
+    cancelBtn.disabled = false;
+    setMeta("connecting");
+    // EventSource natively tracks each frame's "id:" and resends it as
+    // Last-Event-ID on a dropped reconnect; the server honors that
+    // header by replaying only events after it — no manual plumbing
+    // needed, this is the browser's built-in SSE resume contract.
+    es = new EventSource("/tasks/" + id + "/events");
+    ["job.started", "llm.message", "tool.call", "tool.result",
+     "job.completed", "job.failed"].forEach(function (t) {
+      es.addEventListener(t, function (e) { onEvent(t, e.data); });
+    });
+    es.onerror = function () {
+      if (metaEl.textContent.indexOf("状态: succeeded") === -1) {
+        setMeta("重连中…");
+      }
+    };
+  }
+
+  function submitTask(e) {
+    e.preventDefault();
+    var text = promptEl.value.trim();
+    if (!text) { return; }
+    submitBtn.disabled = true;
+    fetch("/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (task) {
+        taskId = task.id;
+        history.replaceState(null, "", "?task=" + taskId);
+        connect(taskId);
+      })
+      .catch(function () {
+        submitBtn.disabled = false;
+        metaEl.textContent = "提交失败";
+      });
+  }
+
+  cancelBtn.addEventListener("click", function () {
+    if (!taskId) { return; }
+    fetch("/tasks/" + taskId + "/cancel", { method: "POST" });
+  });
+  submitBtn.addEventListener("click", submitTask);
+  promptEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { submitTask(e); }
+  });
+
+  // ?task=<id> in the URL reattaches to an existing task and replays its
+  // full history from the start (fresh EventSource, no Last-Event-ID) —
+  // the manual-navigation analogue of cloud behavior #1 (reconnect
+  // without losing history).
+  var params = new URLSearchParams(location.search);
+  if (params.get("task")) {
+    taskId = params.get("task");
+    promptEl.value = "";
+    connect(taskId);
+  }
+})();
+</script>
+</body>
+</html>

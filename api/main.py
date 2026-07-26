@@ -12,6 +12,8 @@ from core.models import EV_COMPLETED, EV_FAILED, TERMINAL
 from core.queuebus import QueueBus
 from core.store import TaskStore
 
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
 class TaskIn(BaseModel):
     prompt: str
     idempotency_key: str | None = None
@@ -42,6 +44,10 @@ def create_app(cfg: Config) -> FastAPI:
         if t is None:
             raise HTTPException(404, "task not found")
         return t
+
+    @app.get("/")
+    def index():
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
     @app.post("/tasks", status_code=201)
     def create_task(body: TaskIn, response: Response):

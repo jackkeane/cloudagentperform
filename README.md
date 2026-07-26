@@ -29,6 +29,10 @@ pip install -e '.[dev]' && python -m pytest    # 86 passed，含真起容器的�
 
 ## 演示里能看到什么
 
+![终端录屏：./demo.sh 完整流程，golden demo 加三条云行为，37 秒](docs/demo.svg)
+
+（上图为 `./demo.sh` 全程录屏的自动播放动画。原始 asciinema 录像在仓库里：`docs/demo.cast`（本条，37s）与 `docs/demo-real.cast`（`--real` 打本地 vLLM 真实推理，29s），`asciinema play docs/demo.cast` 即可终端回放。）
+
 ### golden demo
 
 任务 `Scan the repo for TODO comments and write output/report.md`，扫描对象是内置的 `fixtures/demo-repo/`。CLI 输出节选：

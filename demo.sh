@@ -30,7 +30,7 @@ TID=$(cli submit "Scan the repo for TODO comments and write output/report.md" --
 cli follow "$TID" | tee "$LOGS/golden.log"
 echo "== artifact =="
 curl -fsS "$API/tasks/$TID/artifacts" | tee "$LOGS/artifacts.json"; echo
-curl -fsS "$API/tasks/$TID/artifacts/1/report.md" | tee "$LOGS/report.md"
+curl -fsS "$API/tasks/$TID/artifacts/1/report.md" | tee "$LOGS/report.md"; echo
 grep -q "mode=$MODE" "$LOGS/golden.log" || { echo "FAIL: provenance banner missing"; exit 1; }
 echo "== GOLDEN OK =="
 

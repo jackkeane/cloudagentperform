@@ -1,4 +1,5 @@
 import time
+import traceback
 from uuid import uuid4
 
 from core.config import load_config
@@ -57,7 +58,11 @@ def main():
     print(f"[worker {cfg.worker_id}] started; gc removed {removed};"
           f" llm={llm_factory().describe()}", flush=True)
     while True:
-        poll_once(store, bus, provider, llm_factory, cfg)
+        try:
+            poll_once(store, bus, provider, llm_factory, cfg)
+        except Exception:  # a poisoned task or Redis blip must not kill
+            traceback.print_exc()  # the fleet; SystemExit still passes
+            time.sleep(1)
 
 if __name__ == "__main__":
     main()

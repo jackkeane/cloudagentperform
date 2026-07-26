@@ -78,7 +78,10 @@ def run_attempt(task, store, bus, provider, llm, cfg, lease_token) -> None:
 
     os.makedirs(artifact_dir, exist_ok=True)
     with open(os.path.join(artifact_dir, "transcript.json"), "w") as f:
-        json.dump(outcome.transcript, f, indent=2)
+        # provenance header first: the artifact must answer "which model
+        # produced this" on its own, same as the banner (DECISIONS Q8)
+        json.dump({"llm": llm.describe(), "messages": outcome.transcript},
+                  f, indent=2)
     if outcome.usage:
         store.add_usage(task.id, outcome.usage)
     ev = store.finish(task.id, task.attempt, outcome.status,

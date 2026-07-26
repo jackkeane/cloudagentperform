@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import os
 import threading
 import time
@@ -37,7 +38,9 @@ def test_poll_once_runs_task_to_success(store, bus, tmp_path):
     assert started["llm"]["mode"] == "mock"          # provenance surfaced
     art = tmp_path / "artifacts" / t.id / "1"
     assert (art / "report.md").exists()
-    assert (art / "transcript.json").exists()
+    transcript = json.loads((art / "transcript.json").read_text())
+    assert transcript["llm"]["mode"] == "mock"       # provenance header
+    assert transcript["messages"][0]["role"] == "system"
     assert bus.lease_token(t.id) is None             # released
     assert provider.last.destroyed is True
 

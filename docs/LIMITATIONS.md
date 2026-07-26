@@ -13,6 +13,7 @@
 | 远程 sandbox provider（E2B 等） | 引入外部账号依赖，破坏"评审零依赖跑通"的验收 | 同上：实现 `SandboxProvider` + `SandboxHandle` 五个方法 |
 | `K8sPodSandboxProvider` | Pod 买到的是编排而非更强隔离，且拉高演示成本（DECISIONS.md Q1） | design-only 映射写在 ARCHITECTURE.md，接口同上 |
 | 多租户鉴权/配额 | 任务模型没有 owner 维度，加了也只是装饰性的中间件 | `POST /tasks` 处加认证中间件，tasks 表加 owner 列，配额挂在认领处（`core/store.py` 的 `claim`） |
+| 任意仓库摄入（git URL） | 题目例句里的"这个仓库"在本 demo 固定为内置 fixture（README 已明示）：沙箱默认断网，不该由沙箱去 clone；平台侧代拉又引入凭证与供应链面 | `SandboxProvider.start` 已有 `workspace_src` 注入点，平台侧 clone 到临时目录后作为 `workspace_src` 传入即可，agent 循环零改动 |
 | eval harness | 一条 golden 任务撑不起统计意义；先有任务集才有 eval | `worker/record.py` 已是"跑一次真实任务并留痕"的原型，扩成批量即可 |
 | HITL 审批门 | 事件流是单向的（ADR 0002），审批需要反向通道与暂停语义，牵动状态机 | 状态机加 `awaiting_approval` 态；`run_agent` 的 `should_stop` 钩子已是暂停检查点 |
 

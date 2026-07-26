@@ -1,7 +1,8 @@
 services:
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    # internal-only on purpose: publishing 6379 collides with any local
+    # Redis. Host-run pytest uses its own cap-redis (docs/VERIFICATION.md).
   api:
     build: .
     command: uvicorn api.main:app --host 0.0.0.0 --port 8080

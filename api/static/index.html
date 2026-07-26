@@ -129,7 +129,9 @@
         }
         data.artifacts.forEach(function (a) {
           var link = document.createElement("a");
-          link.href = a.url;
+          // build from parts: a model-chosen filename may contain # or ?
+          link.href = "/tasks/" + taskId + "/artifacts/" + a.attempt + "/" +
+                      String(a.name).split("/").map(encodeURIComponent).join("/");
           link.textContent = "attempt " + a.attempt + " / " + a.name;
           link.setAttribute("download", "");
           artEl.appendChild(link);
@@ -195,9 +197,19 @@
       es.addEventListener(t, function (e) { onEvent(t, e.data); });
     });
     es.onerror = function () {
-      if (metaEl.textContent.indexOf("状态: succeeded") === -1) {
-        setMeta("重连中…");
-      }
+      if (!es) { return; }
+      // A nonexistent task id 404s forever; say so instead of pretending
+      // to reconnect (e.g. a stale ?task= link).
+      fetch("/tasks/" + id).then(function (r) {
+        if (r.status === 404 && es) {
+          es.close(); es = null;
+          cancelBtn.disabled = true;
+          submitBtn.disabled = false;
+          metaEl.textContent = "任务 " + id + " 不存在";
+          return;
+        }
+        if (es) { setMeta("重连中…"); }
+      }).catch(function () { if (es) { setMeta("重连中…"); } });
     };
   }
 

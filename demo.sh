@@ -41,8 +41,10 @@ fi
 
 echo "== behavior 1: client disconnect -> full replay + live resume =="
 B1=$(cli submit "Scan the repo for TODO comments and write output/report.md" --no-follow)
-timeout 3 docker compose exec -T api python -m cli.main --api "$API" follow "$B1" \
-  > "$LOGS/b1_first.log" 2>&1 || true          # client killed mid-run
+docker compose exec -T api python -m cli.main --api "$API" follow "$B1" \
+  > "$LOGS/b1_first.log" 2>&1 & FOLLOW_PID=$!   # a client starts following...
+sleep 3; kill "$FOLLOW_PID" 2>/dev/null || true # ...and is killed mid-run
+wait "$FOLLOW_PID" 2>/dev/null || true
 cli follow "$B1" | tee "$LOGS/b1_replay.log"    # reconnect from scratch
 grep -q "attempt 1 started" "$LOGS/b1_replay.log" || { echo FAIL-B1-history; exit 1; }
 grep -q "succeeded" "$LOGS/b1_replay.log" || { echo FAIL-B1-completion; exit 1; }

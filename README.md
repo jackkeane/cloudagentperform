@@ -18,8 +18,10 @@ docker compose down -v    # 清理
 零 GPU、零 API key、确定性可复现。全绿时依次打印 `GOLDEN OK` / `B1 OK` / `B2 OK` / `B3 OK` / `ALL CLOUD BEHAVIORS PASSED`，任一断言失败即以非零退出码停下。平台起来后浏览器打开 `http://localhost:8080` 是同一条实时事件流的单页 Web UI（自包含单文件，无构建、无外部依赖）。
 
 ```bash
-pip install -e '.[dev]' && python -m pytest    # 83 passed，含真起容器的沙箱集成测试
+pip install -e '.[dev]' && python -m pytest    # 86 passed，含真起容器的沙箱集成测试
 ```
+
+测试的前置：Python ≥ 3.12、本机 Docker、以及 `localhost:6379` 的 Redis（一条命令：`docker run -d --name cap-redis -p 6379:6379 redis:7-alpine`；完整前置见 `docs/VERIFICATION.md` 开头）。只跑 `./demo.sh` 不需要这些，Docker 就够。
 
 ## 演示里能看到什么
 
@@ -84,7 +86,7 @@ LLM_API_KEY=sk-... \
 
 ## 诚实报告
 
-**体量**：2026-07-25 至 2026-07-26 两天完成，共 40 个提交，约 2600 行 Python（其中约 1100 行是测试）。
+**体量**：2026-07-25 至 2026-07-26 两天完成，约 2700 行 Python（其中约 1150 行是测试）。
 
 **有意不实现**（设计里写了、代码里没有，理由是它们不改变本次要展示的判断，只增加体量；逐条的切入点见 `docs/LIMITATIONS.md`）：Temporal 持久化工作流、microVM/gVisor 加固、多租户鉴权、远程 sandbox provider、eval harness、HITL 审批门。验收钉在 CLI 上；单页 Web UI 作为核心完成后的补充项加回（`api/static/index.html`，同一 API、同一事件流、同一运行来源横幅）。
 
@@ -106,4 +108,4 @@ LLM_API_KEY=sk-... \
 | `cli/` | 验收载体。submit / follow（显式 `Last-Event-ID` 重连）/ cancel，退出码反映任务终态 |
 | `fixtures/` | `demo-repo/` golden demo 的扫描对象，`trajectories/` 录制的回放轨迹 |
 | `docs/` | `ARCHITECTURE.md` 架构与部署映射，`DECISIONS.md` 设计拷问 Q&A，`adr/` 难逆决策，`VERIFICATION.md` 假设与验证命令，`LIMITATIONS.md` 边界清单，`AI-USAGE.md` AI 使用披露，`specs/` 设计规格，`plans/` 实现计划 |
-| `tests/` | 83 个测试，含真起容器的沙箱集成测试与 in-process 端到端 |
+| `tests/` | 86 个测试，含真起容器的沙箱集成测试与 in-process 端到端 |

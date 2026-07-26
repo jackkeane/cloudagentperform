@@ -23,7 +23,7 @@
 1. **mock 是 step-locked replay。** 按录制顺序吐 tool call，不依据实时 tool 结果重新决策。它能证明平台管道（调度、隔离、事件、恢复），不能证明 agent 的自适应能力；后者只有 `--real` 能证明。
 2. **真实模型跑通依赖显式的 tool-use 提示词纪律。** 一次一个 tool call、tool 调用之间不共享 shell 状态、失败命令换写法而不是原样重试——第一次真实录制正是因为缺这些纪律而失败（模型在同一条消息里同时发 `bash` 和 `write_file`，并用 `$VAR` 在 tool 之间传数据）。当前护栏更多来自 prompt 而非结构，换一个更小或未对齐 tool-use 的模型可能需要重调（`agent/loop.py` 的 `SYSTEM_PROMPT` 与 `strip_reasoning`）。
 3. **worker 挂载宿主 `docker.sock`，root 等价权限。** 只出现在受信任的平台侧、绝不进入沙箱容器（compose 里有注释钉死），但仍是单机 demo 的取舍；消除路径是远程 provider 或 K8s API + 专用 ServiceAccount（ARCHITECTURE.md）。
-4. **`renew_lease` 是 GET+校验+EXPIRE，非原子。** 极端时序下 lease 可能在校验后、续期前过期并被 reconcile 回收，产生一个"僵尸 attempt"与新 attempt 并行跑。上限是浪费一份算力：终态写入被 `(status=running, attempt)` 的 CAS 守护，僵尸的写入必然失败，结果不会被污染（`core/queuebus.py` 注释、`tests/test_worker.py::test_lost_lease_race_leaves_task_recoverable`）。
+4. **`renew_lease` 是 GET+校验+EXPIRE，非原子。** 极端时序下 lease 可能在校验后、续期前过期并被 reconcile 回收，产生一个"僵尸 attempt"与新 attempt 并行跑。上限是浪费一份算力：终态写入被 `(status=running, attempt)` 的 CAS 守护，僵尸的写入必然失败，结果不会被污染（`core/queuebus.py` 注释；CAS 拒写见 `tests/test_store.py::test_finish_cas_loses_on_stale_attempt`，认领竞争见 `tests/test_worker.py::test_lost_lease_race_leaves_task_recoverable`）。
 5. **SQLite 单写者。** WAL + busy_timeout 在单机两三个进程下够用；跨机需换 Postgres（部署映射表）。事件表只追加、按 `(task_id, id)` 读，迁移面窄。
 6. **无鉴权、无配额、无成本上限。** 任何能访问 8080 的人都能提交任务烧算力；`max_steps`/超时限制单次任务的上限，不限制提交频率。
 7. **重跑无幂等保证。** `max_attempts=2` 的重跑只因"工具只写沙箱内文件"而安全；接入任何有外部副作用的工具前，必须先解决去重/幂等（ADR 0003 的明示负债）。

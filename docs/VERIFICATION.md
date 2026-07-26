@@ -120,6 +120,6 @@ LLM_MODE=real LLM_BASE_URL=http://localhost:9 ./demo.sh --real   # 期望：快�
 ## 全量回归
 
 ```bash
-.venv/bin/python -m pytest    # 83 passed；含真起容器的沙箱集成测试与 in-process 端到端
+.venv/bin/python -m pytest    # 86 passed；含真起容器的沙箱集成测试与 in-process 端到端
 ./demo.sh                     # GOLDEN OK + B1 OK + B2 OK + B3 OK + ALL CLOUD BEHAVIORS PASSED
 ```

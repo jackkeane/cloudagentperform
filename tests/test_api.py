@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import os
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -86,6 +87,52 @@ def test_events_resume_with_last_event_id(client):
         events = parse_sse(list(r.iter_lines()))
     assert all(e["id"] > first_id for e in events)
     assert [e["type"] for e in events] == ["tool.call", "job.completed"]
+
+def test_live_overlap_duplicate_is_deduped(client):
+    # The handoff race: an event that is both in the history read AND
+    # published on pubsub must stream exactly once (subscribe-first + id
+    # dedup, api/main.py _stream). Publish fires only after Redis reports
+    # our subscriber, so the overlap is forced, not timing-lucky.
+    import threading
+    store, bus = client.app.state.store, client.app.state.bus
+    t, _ = store.create_task("x")
+    store.claim(t.id, "w1")
+    store.append_event(t.id, 1, EV_STARTED, {"attempt": 1})
+    e2 = store.append_event(t.id, 1, EV_TOOL_CALL, {"name": "bash"})
+
+    def publish_when_subscribed():
+        ch = bus.channel_for(t.id)
+        for _ in range(500):
+            if int(bus.r.execute_command("PUBSUB", "NUMSUB", ch)[1]) >= 1:
+                break
+            time.sleep(0.01)
+        bus.publish_event(e2)                     # duplicate of history
+        bus.publish_event(store.finish(t.id, 1, SUCCEEDED, summary="ok"))
+
+    threading.Thread(target=publish_when_subscribed, daemon=True).start()
+    with client.stream("GET", f"/tasks/{t.id}/events") as r:
+        events = parse_sse(list(r.iter_lines()))
+    assert [e["type"] for e in events] == \
+        ["job.started", "tool.call", "job.completed"]   # tool.call once
+    ids = [e["id"] for e in events]
+    assert ids == sorted(set(ids))
+
+
+def test_numeric_param_guards(client, tmp_path):
+    store = client.app.state.store
+    tid = _seed_finished_task(store)
+    r = client.get(f"/tasks/{tid}/events", headers={"Last-Event-ID": "abc"})
+    assert r.status_code == 400
+    # attempt=".." would re-root the realpath guard at the artifacts root,
+    # exposing OTHER tasks' files to anyone holding one valid task id
+    other, _ = store.create_task("y")
+    odir = tmp_path / "artifacts" / other.id / "1"
+    os.makedirs(odir)
+    (odir / "secret.md").write_text("s")
+    cross = client.get(
+        f"/tasks/{tid}/artifacts/%2E%2E/{other.id}/1/secret.md")
+    assert cross.status_code == 404
+
 
 def test_artifacts_listing_download_and_traversal_guard(client, tmp_path):
     store = client.app.state.store

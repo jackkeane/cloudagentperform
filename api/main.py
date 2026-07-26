@@ -114,8 +114,11 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/tasks/{task_id}/events")
     async def task_events(task_id: str, request: Request):
         _get_or_404(task_id)
-        after = int(request.headers.get("last-event-id")
-                    or request.query_params.get("after") or 0)
+        try:
+            after = int(request.headers.get("last-event-id")
+                        or request.query_params.get("after") or 0)
+        except ValueError:
+            raise HTTPException(400, "Last-Event-ID must be an integer")
         return StreamingResponse(_stream(task_id, after),
                                  media_type="text/event-stream")
 
@@ -126,6 +129,8 @@ def create_app(cfg: Config) -> FastAPI:
         items = []
         if os.path.isdir(base):
             for attempt in sorted(os.listdir(base)):
+                if not attempt.isdigit():  # stray dirs must not 500 the list
+                    continue
                 adir = os.path.join(base, attempt)
                 for root, _dirs, files in os.walk(adir):
                     for name in sorted(files):
@@ -139,6 +144,8 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/tasks/{task_id}/artifacts/{attempt}/{name:path}")
     def download_artifact(task_id: str, attempt: str, name: str):
         _get_or_404(task_id)
+        if not attempt.isdigit():  # ".." here would re-root the realpath
+            raise HTTPException(404, "artifact not found")  # guard below
         base = os.path.realpath(
             os.path.join(cfg.artifacts_dir, task_id, attempt))
         full = os.path.realpath(os.path.join(base, name))

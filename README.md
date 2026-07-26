@@ -4,7 +4,7 @@
 
 Python 3.12 / FastAPI / Redis / SQLite / Docker。不使用任何 agent 框架，循环本身是被考察的东西。
 
-设计规格见 `docs/specs/`，架构与部署映射见 `docs/ARCHITECTURE.md`，取舍的原始推理见 `docs/DECISIONS.md`（Q1–Q8 是设计阶段的自我拷问记录，下文决策表逐条引用它）。
+设计规格见 `docs/specs/`，架构与部署映射见 `docs/ARCHITECTURE.md`，取舍的原始推理见 `docs/DECISIONS.md`（Q1–Q8 是设计阶段的自我拷问记录，下文决策表逐条引用它）。难逆决策的 ADR 在 `docs/adr/`；每条风险假设的验证命令在 `docs/VERIFICATION.md`；诚实的边界清单在 `docs/LIMITATIONS.md`；考题要求的 AI 使用披露在 `docs/AI-USAGE.md`。
 
 ## Quickstart
 
@@ -15,10 +15,10 @@ Python 3.12 / FastAPI / Redis / SQLite / Docker。不使用任何 agent 框架�
 docker compose down -v    # 清理
 ```
 
-零 GPU、零 API key、确定性可复现。全绿时依次打印 `GOLDEN OK` / `B1 OK` / `B2 OK` / `B3 OK` / `ALL CLOUD BEHAVIORS PASSED`，任一断言失败即以非零退出码停下。
+零 GPU、零 API key、确定性可复现。全绿时依次打印 `GOLDEN OK` / `B1 OK` / `B2 OK` / `B3 OK` / `ALL CLOUD BEHAVIORS PASSED`，任一断言失败即以非零退出码停下。平台起来后浏览器打开 `http://localhost:8080` 是同一条实时事件流的单页 Web UI（自包含单文件，无构建、无外部依赖）。
 
 ```bash
-pip install -e '.[dev]' && python -m pytest    # 81 passed，含真起容器的沙箱集成测试
+pip install -e '.[dev]' && python -m pytest    # 83 passed，含真起容器的沙箱集成测试
 ```
 
 ## 演示里能看到什么
@@ -84,9 +84,9 @@ LLM_API_KEY=sk-... \
 
 ## 诚实报告
 
-**时间**：两天，第一个提交 2026-07-25 12:43，最后一个 2026-07-26 07:54，累计投入约 12 小时（设计与架构拷问约 4 小时、实现约 5 小时、文档与演示约 3 小时）。共 31 个提交。代码约 2543 行 Python，其中约 1054 行是测试。
+**时间**：两天，2026-07-25 至 2026-07-26，累计投入约 14 小时（设计与架构拷问约 4 小时、实现约 6 小时、文档与演示约 4 小时）。共 40 个提交。约 2600 行 Python，其中约 1100 行是测试。
 
-**有意不实现**（设计里写了、代码里没有，理由是它们不改变本次要展示的判断，只增加体量）：Temporal 持久化工作流、microVM/gVisor 加固、多租户鉴权、远程 sandbox provider、eval harness、HITL 审批门。单页 Web UI 按预定的砍单顺序砍掉，验收全部钉在 CLI 上。
+**有意不实现**（设计里写了、代码里没有，理由是它们不改变本次要展示的判断，只增加体量；逐条的切入点见 `docs/LIMITATIONS.md`）：Temporal 持久化工作流、microVM/gVisor 加固、多租户鉴权、远程 sandbox provider、eval harness、HITL 审批门。验收钉在 CLI 上；单页 Web UI 作为核心完成后的补充项加回（`api/static/index.html`，同一 API、同一事件流、同一运行来源横幅）。
 
 **最弱的一环**，三点：
 
@@ -98,12 +98,12 @@ LLM_API_KEY=sk-... \
 
 | 路径 | 作用 |
 |---|---|
-| `api/` | FastAPI。任务提交（带幂等键）、查询、取消、SSE 事件流、artifact 列表与下载 |
+| `api/` | FastAPI。任务提交（带幂等键）、查询、取消、SSE 事件流、artifact 列表与下载；`static/index.html` 单页 Web UI |
 | `worker/` | 独立进程。`main.py` 轮询与租约认领，`attempt.py` 单次 attempt 的心跳/看门狗/产物晋升，`reconcile.py` 从 SQLite 修复 Redis，`record.py` 录制真实轨迹 |
 | `agent/` | LLM 层与循环。`llm.py` provider 抽象与 OpenAI 兼容客户端，`loop.py` 手写工具调用循环，`tools.py` 四个工具与分意图截断，`mock.py` 哈希钉扎的回放 |
 | `sandbox/` | `provider.py` 沙箱接口，`docker_provider.py` 加固过的 Docker 实现 |
 | `core/` | `store.py` SQLite 任务与事件存储（状态机的 CAS 都在这），`queuebus.py` Redis 队列/租约/pubsub，`models.py` 状态与事件常量，`config.py` 环境变量 |
 | `cli/` | 验收载体。submit / follow（显式 `Last-Event-ID` 重连）/ cancel，退出码反映任务终态 |
 | `fixtures/` | `demo-repo/` golden demo 的扫描对象，`trajectories/` 录制的回放轨迹 |
-| `docs/` | `ARCHITECTURE.md` 架构与部署映射，`DECISIONS.md` 设计拷问 Q&A，`specs/` 设计规格，`plans/` 实现计划 |
-| `tests/` | 81 个测试，含真起容器的沙箱集成测试与 in-process 端到端 |
+| `docs/` | `ARCHITECTURE.md` 架构与部署映射，`DECISIONS.md` 设计拷问 Q&A，`adr/` 难逆决策，`VERIFICATION.md` 假设与验证命令，`LIMITATIONS.md` 边界清单，`AI-USAGE.md` AI 使用披露，`specs/` 设计规格，`plans/` 实现计划 |
+| `tests/` | 83 个测试，含真起容器的沙箱集成测试与 in-process 端到端 |

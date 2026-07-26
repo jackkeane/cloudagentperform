@@ -8,9 +8,9 @@
 
 | 工具 | 具体型号 | 用在哪 | 不用在哪 |
 |---|---|---|---|
-| Claude Code | Opus 5 | 主控循环、架构拷问、实现计划、环境相关的实现 lane（sandbox、worker、API） | 未用于替我做取舍决策 |
-| Claude Code subagent | Sonnet 5 | 纯单测转写 lane、文档 lane（ADR/VERIFICATION/LIMITATIONS） | 未用于 sandbox 加固等安全相关代码 |
-| Claude Code subagent | Fable 5 | 仅保留一次，用于交付前的整分支复审 | 未参与实现 |
+| Claude Code | Opus 5 | 主控循环（设计到实现阶段）、架构拷问、实现计划、环境相关的实现 lane（sandbox） | 未用于替我做取舍决策 |
+| Claude Code | Fable 5 | 收尾阶段主控（真实录制失败的根因修复、VERIFICATION/LIMITATIONS 撰写、勘误与交付自查）与交付前整分支复审 | 未参与前期设计决策 |
+| Claude Code subagent | Opus/Sonnet 5 | 实现 lane（queuebus、worker、API、e2e）、README/ARCHITECTURE 与 ADR 起草、Web UI | 未用于 sandbox 加固等安全相关代码 |
 | grok build（headless CLI） | grok-code | 5 个纯单元测试 lane（store / llm / loop / cli / record），零网络零 docker | 未参与任何设计决策；产出由我机械校验 |
 | grok（独立会话） | grok-4 | 对设计 spec 做一次独立复核，扮演反方 | 未直接写入仓库，复核意见由我逐条裁决 |
 

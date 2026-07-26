@@ -62,9 +62,11 @@ class OpenAICompatProvider(LLMProvider):
             try:
                 resp = self.http.post(f"{self.base_url}/chat/completions",
                                       json=payload)
-                if resp.status_code >= 500:
-                    raise LLMError(f"server error {resp.status_code}")
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Any HTTP failure (401/429/5xx/...) must fail the TASK
+                    # as model_error after retries — never the worker process.
+                    raise LLMError(f"status {resp.status_code}:"
+                                   f" {resp.text[:200]}")
                 return self._parse(resp.json())
             except (httpx.TransportError, LLMError) as exc:
                 last = exc

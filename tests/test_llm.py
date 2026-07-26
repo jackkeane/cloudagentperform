@@ -53,6 +53,13 @@ def test_retry_then_success():
         return httpx.Response(200, json=_ok_body(content="hi"))
     assert make(handler).chat([], tools=[]).text == "hi"
 
+def test_4xx_maps_to_llm_error_not_worker_crash():
+    def handler(req):
+        return httpx.Response(401, json={"error": "bad key"})
+    with pytest.raises(LLMError, match="401"):
+        make(handler).chat([], tools=[])   # LLMError -> task fails as
+                                           # model_error; process survives
+
 def test_api_key_sent_as_bearer_and_absent_from_describe():
     def handler(req):
         assert req.headers["authorization"] == "Bearer sk-test"

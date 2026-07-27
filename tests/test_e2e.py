@@ -1,5 +1,5 @@
 """Full stack: API -> redis queue -> worker -> docker sandbox -> mock LLM
--> events -> SSE replay -> artifacts. The D1 exit criterion."""
+-> events -> SSE replay -> artifacts. The vertical-slice exit criterion."""
 import dataclasses
 import time
 

@@ -10,7 +10,9 @@ def bus():
         r = redis_lib.Redis.from_url(REDIS_URL)
         r.ping()
     except Exception:
-        pytest.fail("Redis required for this test: docker compose up -d redis")
+        pytest.fail("Redis required at localhost:6379 (tests use db 15). Start one: "
+                    "docker run -d --name cap-redis -p 6379:6379 redis:7-alpine "
+                    "(compose's redis is internal-only and cannot serve host tests)")
     r.flushdb()
     return QueueBus(REDIS_URL)
 

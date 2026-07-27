@@ -1,12 +1,12 @@
 # Cloud Agent Platform — 设计规格
 
-日期：2026-07-25 ｜ 版本：v1.3（v1.1 经独立评审、v1.2 经聚焦 grilling、v1.3 为实现期勘误，见文末修订记录）｜ 状态：已确认（2026-07-25）｜ 语言约定：文档中文，代码/标识符/commit 英文
+日期：2026-07-25 ｜ 版本：v1.4（v1.1 经独立评审、v1.2 经聚焦 grilling、v1.3 为实现期勘误、v1.4 为提交前对齐勘误，见文末修订记录）｜ 状态：已确认（2026-07-25）｜ 语言约定：文档中文，代码/标识符/commit 英文
 
 ## 1. 背景与约束
 
 VUI Labs（宇生月伴）笔试 WT-0956380588：构建一个 Cloud Agent Platform 演示——用户提交自然语言任务，平台在隔离环境中运行自主 agent（LLM 推理 + 工具调用循环）直至完成并返回结果。
 
-- 截止：2026-07-30 23:59（北京时间）；时间预算：8~12 小时，分 2-3 天，README 如实申报用时
+- 截止：2026-07-30 23:59（北京时间）；时间预算：8~12 小时，分 2-3 天；README 申报 git 可验证的体量事实（完成日期与代码行数），不申报自估小时数（见修订记录 v1.4）
 - 评估维度：问题拆解、架构取舍、工程质量、可扩展性、真实业务理解
 - 考察点：① agent 编排与调度 ② 沙箱与隔离执行 ③ LLM 集成与工具调用 ④ 整体架构与可扩展性
 - 运行环境：WSL2 + Docker 的笔记本；评审必须能在 10 分钟内跑通
@@ -46,7 +46,7 @@ flowchart LR
 - **attempt 语义（崩溃恢复的诚实版本）**：每次 attempt = 全新沙箱 + 全新 workspace + 从头执行的循环；事件流带 `attempt` 字段，恢复演示明说"重新执行"而非"断点续跑"。不做 workspace checkpoint（进非目标）。at-least-once 的副作用问题由"attempt 隔离的全新 workspace"消解——重跑不会污染上一次的半成品
 - **Redis lease 即并发槽**：认领 = `SET lease:{task_id} {worker_token} NX EX ttl`；活跃 lease 数即在跑任务数，达到上限（默认 2）则不再认领。worker 崩溃 → lease TTL 自然过期 → 槽位自动释放 + 任务重入队，无需独立计数器
 - **心跳与长阻塞工具**：工具 `exec` 阻塞期间由 worker 的独立心跳协程续约（校验 token 后续期）；终态写入用 compare-and-swap（校验自己仍持有 lease token），双 worker 竞态时后者写入失败
-- **Reconcile——Redis 视为可重建缓存**：worker 主循环周期执行两步修复：① `running` 但 Redis 无 lease → CAS 回收 `running→queued` 并重新入队（云行为 #2 崩溃恢复的触发机制正是它）；② `queued` 但不在 Redis 队列 → 补推。**Redis 中无唯一事实，全部可从 SQLite 重建**（Redis 重启空库走同一恢复路径）；重复入队无害（认领由 `SET NX` 去重）
+- **Reconcile——Redis 视为可重建缓存**：worker 主循环周期执行两步修复：① `running` 但 Redis 无 lease → CAS 回收 `running→queued` 并重新入队（云行为 B2 崩溃恢复的触发机制正是它）；② `queued` 但不在 Redis 队列 → 补推。**Redis 中无唯一事实，全部可从 SQLite 重建**（Redis 重启空库走同一恢复路径）；重复入队无害（认领由 `SET NX` 去重）
 - 协作式取消：工具调用间隙检查取消标志；**取消同时强制终止沙箱**（destroy 容器即打断阻塞中的 exec）。任务墙钟超时由 worker 侧 watchdog 执行，同样走强制销毁路径
 - `idempotency_key` 作用域：同 key 重复提交返回既有 task_id（HTTP 200 + 原任务体），不新建
 - 禁止事项：无持久化记录的 fire-and-forget `asyncio.create_task`
@@ -64,7 +64,7 @@ flowchart LR
 ### 4.3 LLM 集成层（考察点③）
 
 - `LLMProvider` 接口：`chat(messages, tools) -> (text, tool_calls, usage)`，OpenAI 兼容协议
-- `OpenAICompatProvider`：默认指向本地 vLLM 的 **Qwen3-14B-AWQ**（`base_url` 可配置）。兼容任何 OpenAI 协议端点；配置三元组 `LLM_BASE_URL` / `LLM_API_KEY`（`Authorization: Bearer`，本地 vLLM 可留空）/ `LLM_MODEL`，README 提供「评审自带 key 实测」一节（DeepSeek / OpenAI / DashScope 复制粘贴示例）。real 模式启动先 preflight `GET /v1/models`：端点不可达或模型不在列即 fail fast，不静默回落。WSL2 下容器访问宿主：compose 配 `extra_hosts: ["host.docker.internal:host-gateway"]`（docker-ce 无 Docker Desktop 的自动 DNS）
+- `OpenAICompatProvider`：默认指向本地 vLLM 的 **Qwen3-14B-AWQ**（`base_url` 可配置）。兼容任何 OpenAI 协议端点；配置三元组 `LLM_BASE_URL` / `LLM_API_KEY`（`Authorization: Bearer`，本地 vLLM 可留空）/ `LLM_MODEL`，README 提供「评审自带 key 实测」一节（DeepSeek / OpenAI / DashScope 复制粘贴示例）。real 模式启动先 preflight `GET /v1/models`：端点不可达或模型不在列即 fail-fast，不静默回落。WSL2 下容器访问宿主：compose 配 `extra_hosts: ["host.docker.internal:host-gateway"]`（docker-ce 无 Docker Desktop 的自动 DNS）
 - 工具调用：**钉死 native `tool_calls`**（OpenAI 协议标准件，任意兼容端点即插即用；prompt-JSON 备选删除不建）。本地 vLLM 属部署侧配置：启动参数需含 `--enable-auto-tool-choice --tool-call-parser <实测值>`（`hermes` 或 qwen3 系，随 vLLM 版本变化）；若本地 parser 实测不顺，fixture 改用任意 OpenAI 兼容端点录制——本地 Qwen3 是首选项而非关键路径。README 注明所用权重与 `--max-model-len`（Qwen3-14B 原生 32K，AWQ 部署可能配置更短）
 - **`MockProvider` 回放语义（钉死）**：回放 = 对着**哈希钉扎的 fixture** 录制的一次真实运行轨迹，按 step 顺序吐出 `tool_calls`/文本，不依据实时 tool result 重新决策；fixture 内容 + 确定性命令保证轨迹可重现；UI/CLI/README 明确标注"回放模式（录制自真实 Qwen3 运行）"，不包装成实时推理。评审无 GPU 时跑通的是**平台**（队列/沙箱/SSE 全真实），模型智能由录制 transcript + 真实模式录屏证明。`demo.sh` 默认 mock，`--real` 显式切换（无探测、无自动回落）；录制入口（`--record`：真实模式运行并存轨迹）与原始 transcript 一并入库，作为回放真实性证据
 - **运行来源外显（不可伪装原则）**：每次运行的 `job.started` 事件 payload 携带 `llm: {mode: mock|real, model, base_url}`（永不含 key）；CLI banner、transcript 头、demo.sh 开场打印同一信息。mock 额外标注录制来源（录制模型/日期/fixture 哈希）；real 如实报告 base_url 与模型名，不猜测端点品牌（vLLM / Ollama / 云端点由 base_url 自证）
@@ -140,7 +140,7 @@ ADR（3 个）：① 本地可跑的 demo 为什么代表云平台；② SSE vs 
 
 1. **断连续传**：CLI 提交任务 → 杀掉 CLI → 重启 CLI 带 `Last-Event-ID` 重连 → 完整回放 + 续实时流（执行与客户端分离）
 2. **worker 崩溃恢复**：任务运行中 `docker kill worker` → lease 过期 → 任务重入队 → 新 worker 清理旧容器、以 attempt=2 从头重跑至完成（平台韧性；话术明确"重新执行"）
-3. **并发隔离**：两个任务同时提交 → 独立沙箱、独立事件流（租户隔离）
+3. **并发隔离**：两个任务同时提交 → 独立沙箱、独立事件流（任务间隔离，沙箱级）
 
 ## 9. 时间计划
 
@@ -159,6 +159,7 @@ ADR（3 个）：① 本地可跑的 demo 为什么代表云平台；② SSE vs 
 
 ## 修订记录
 
+- v1.4（2026-07-27）：提交前对齐勘误。①「README 如实申报用时」改为「申报 git 可验证的体量事实、不申报自估小时数」——自估工时无法被评审验证，与本仓库「可核对」的文档原则冲突；② §4.2 的 `SandboxProvider` 签名与 §7 目录树以代码与 ARCHITECTURE.md §8 为准（实签名 `start(task_id, attempt, workspace_src=None)`；web UI 落地为 `api/static/index.html`）；③ 跨文档术语统一：沙箱（不再混用「沙盒」）、B1 统一称「断连续传」、fail-fast。
 - v1.3（2026-07-26）：实现期勘误，代码为准、spec 跟进。三处：单写者表述精确化为"属主写入"（API 的 `cancel_queued` 也合法写事件，属主校验是 `status=queued` 的 CAS）；`read_file` 截断为纯头部、不加行号；`<think>` 文本改由循环剥离（首次真实录制失败的直接产物）。
 - v1.2（2026-07-25）：聚焦 grilling 后修订（Q&A 存档见 `docs/DECISIONS.md` Q2–Q8）。主要变更：worker reconcile（Redis 视为可重建缓存）+ 对应集成测试；tool-calls 钉死 native、删除 prompt-JSON 备选；LLM 配置三元组与评审自带 key 的 `--real` 通道 + preflight；`--record` 录制入口与原始 transcript 入库；运行来源外显（mode/model/base_url 进 `job.started` 与 CLI banner，mock 标注录制来源）；无自动回落。
 - v1.1（2026-07-25）：经 grok-4.5 独立评审后修订。主要变更：补 `running→queued` 回收转移与 attempt 级重跑语义；artifact 先晋升后销毁；Mock 回放语义钉死（step 锁定 + fixture 哈希钉扎 + 明确标注）；lease 即并发槽 + token CAS + 孤儿容器 label GC；SSE 交接竞态与 CLI 断点续传验收；沙箱加固补 no-new-privileges/非root/pids-limit/默认网络none；截断分工具类型；UI 与 git_url 预降级；SQLite 写入纪律；事件 schema 刚性化；ADR 压缩至 3 个。

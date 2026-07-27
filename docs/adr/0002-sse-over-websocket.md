@@ -7,7 +7,7 @@
 `GET /tasks/{id}/events` 需要把任务事件（`job.started`/`llm.message`/`tool.call`/`tool.result`/`job.completed`/`job.failed`）实时推给 CLI 与浏览器，并支持断连后续传（云行为 B1）。
 
 ## 决策
-数据流严格单向 server→client（上行仅离散的 `POST /tasks`、`POST /tasks/{id}/cancel`）。SSE 是 HTTP 语义内成熟的单向流：浏览器 `EventSource` 原生支持、`curl -N` 可直接终端演示、经普通 HTTP 代理和负载均衡器友好。断点续传靠自实现的 `Last-Event-ID`：服务端先订阅 Redis pubsub 再读 SQLite 历史（防止交接窗口丢事件），按事件 id 去重合并（`api/main.py` 的 `_stream`）；CLI 显式实现重连携带逻辑（`cli/main.py` 的 `follow_events`），验收不依赖浏览器自动重连。事件契约与传输层解耦，未来加 WebSocket 网关不需要改任务/事件模型。
+数据流严格单向 server→client（上行仅离散的 `POST /tasks`、`POST /tasks/{id}/cancel`）。SSE 是 HTTP 语义内成熟的单向流：浏览器 `EventSource` 原生支持、`curl -N` 可直接终端演示、对普通 HTTP 代理和负载均衡器友好。断点续传靠自实现的 `Last-Event-ID`：服务端先订阅 Redis pubsub 再读 SQLite 历史（防止交接窗口丢事件），按事件 id 去重合并（`api/main.py` 的 `_stream`）；CLI 显式实现重连携带逻辑（`cli/main.py` 的 `follow_events`），验收不依赖浏览器自动重连。事件契约与传输层解耦，未来加 WebSocket 网关不需要改任务/事件模型。
 
 ## 后果
 正面：省掉连接状态管理与心跳协议的工程量；回放/交接/去重虽是真实实现工作，但换来协议层零负担的断连恢复；任何 HTTP 客户端（curl、httpx）都能消费事件流，便于测试与演示。

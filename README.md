@@ -8,9 +8,11 @@ Python 3.12 / FastAPI / Redis / SQLite / Docker。不使用任何 agent 框架�
 
 （截图为 `--real` 模式对本地 vLLM 的一次真实运行；默认 mock 模式的界面相同，横幅显示 `mode=mock model=replay:...`。）
 
-设计规格见 `docs/specs/`，架构与部署映射见 `docs/ARCHITECTURE.md`，取舍的原始推理见 `docs/DECISIONS.md`（Q1–Q8 是设计阶段的自我拷问记录，下文决策表逐条引用它）。难逆决策的 ADR 在 `docs/adr/`；每条风险假设的验证命令在 `docs/VERIFICATION.md`；诚实的边界清单在 `docs/LIMITATIONS.md`；考题要求的 AI 使用披露在 `docs/AI-USAGE.md`。
+完整文档都在 `docs/` 下，文末[目录导航](#目录导航)有逐个说明；下文决策表引用的 Q1–Q8 即 `docs/DECISIONS.md` 的设计拷问记录。
 
-## Quickstart
+**导航**：[快速开始](#快速开始) · [演示里能看到什么](#演示里能看到什么) · [关键决策](#关键决策) · [面试官自测](#面试官自测用你自己的-key-跑真实模型) · [云平台上线教程](#云平台上线教程阿里云-ecs--aws-ec2) · [诚实报告](#诚实报告) · [目录导航](#目录导航)
+
+## 快速开始
 
 前置条件只有 Docker 与 docker compose（开发与验证环境为 WSL2 + Docker）。
 
@@ -23,7 +25,7 @@ docker compose down -v    # 清理
 
 ### 本地开发环境（uv）
 
-跑测试或改代码时建议用 [uv](https://docs.astral.sh/uv/) 建独立 venv。依赖的唯一事实源是 `pyproject.toml`；`requirements.txt` 是它的锁定视图，由 `uv pip compile pyproject.toml --extra dev --universal` 生成（文件头带生成命令，可复现），把含传递依赖在内的全部版本钉死：
+跑测试或改代码时建议用 [uv](https://docs.astral.sh/uv/) 建独立 venv。依赖的唯一事实源是 `pyproject.toml`；`requirements.txt` 是它的锁定视图，由 `uv pip compile pyproject.toml --extra dev --universal` 生成（文件头带生成命令，可复现），把全部版本（含传递依赖）钉死：
 
 ```bash
 uv venv --python 3.12 && source .venv/bin/activate
@@ -76,14 +78,14 @@ agent: The TODO report has been generated and saved to `output/report.md`. ...
 |---|---|---|
 | B1 断连续传 | 提交后杀掉 CLI，再重连 | 执行与客户端解耦。历史事件从 SQLite 完整回放，再无缝接上实时流，刷新不丢历史 |
 | B2 崩溃恢复 | 运行中 `docker compose kill worker` 杀掉全部副本，等租约过期，拉起新 worker | 平台在进程死亡后自愈。租约过期 → `reconcile()` 回收 `running→queued` → 新 worker 按 label 清掉旧容器、以 `attempt 2` 从头重跑至成功。这是重跑不是断点续跑，事件流里如实带 attempt 字段 |
-| B3 并发隔离 | 同时提交两个任务，用 `docker ps --filter label=cap.task_id` 数出至少两个不同沙箱 | 租户隔离。独立容器、独立事件流、独立 artifact 目录 |
+| B3 并发隔离 | 同时提交两个任务，用 `docker ps --filter label=cap.task_id` 数出至少两个不同沙箱 | 任务间隔离（沙箱级；账户级多租户在非目标内）。独立容器、独立事件流、独立 artifact 目录 |
 
 ## 关键决策
 
 | 决策 | 选择 | 放弃的备选 | 理由 |
 |---|---|---|---|
 | 沙箱形态 | 一次性 Docker 容器，每 attempt 一个 | K8s Pod-per-task | Pod 买到的是编排能力而非更强的隔离边界（底下同样是 runc、共享宿主内核），却默认带上 ServiceAccount token 与集群网络，比一个 `network_disabled` 容器的攻击面更大（Q1） |
-| 存储分工 | SQLite 是唯一事实源，Redis 只放队列、租约、pubsub | Redis-only（Streams + AOF） | 终态与终态事件必须同事务写入；Redis 里没有唯一事实，`worker/reconcile.py` 能从 SQLite 把队列和在跑任务整体重建，两个存储由复杂度负债翻转为故障域隔离（Q2、Q3、Q4） |
+| 存储分工 | SQLite 是唯一事实源，Redis 只放队列、租约、pubsub | Redis-only（Streams + AOF） | 终态与终态事件必须同事务写入；Redis 里没有唯一事实，`worker/reconcile.py` 能从 SQLite 把队列和在跑任务整体重建，第二个存储因此不是复杂度负债，而是独立的故障域（Q2、Q3、Q4） |
 | 崩溃恢复语义 | attempt 级从头重跑，每次全新沙箱与全新 workspace | workspace checkpoint 断点续跑 | 全新 workspace 让 at-least-once 的副作用自动消解，不必做跨进程一致的快照。代价是重复算力，如实写进事件流的 attempt 字段，不包装成「续跑」 |
 | Agent 循环 | 手写，直接打 OpenAI 兼容 chat-completions | LangChain / CrewAI 等框架 | 循环本身是被考察对象。护栏（max_steps、墙钟超时、单工具超时、分工具截断、失败原因分类）需要逐条可指认，框架会把它们藏进配置 |
 | 事件传输 | SSE + 服务端 `Last-Event-ID` 续传 | WebSocket | 数据流严格单向，上行只有离散 POST 命令，SSE 在 HTTP 语义内即可满足，`curl -N` 能直接演示。WS 真正适用的场景（HITL 中途对话、交互式 PTY）全在非目标内（承认：回放、交接、去重是实打实的实现工作，不是协议赠品） |
@@ -100,7 +102,15 @@ LLM_API_KEY=sk-... \
 ./demo.sh --real
 ```
 
-任何 OpenAI 兼容端点都可以（本地 vLLM 或 Ollama 填对应 `base_url`，`LLM_API_KEY` 可留空）。worker 启动时先 preflight `GET /v1/models`，端点不可达或模型不在返回列表里就立刻失败，绝不静默回落 mock。此时横幅变成 `mode=real model=... endpoint=...`。
+任何 OpenAI 兼容端点都可以，三家云端点的复制粘贴值（把 `LLM_API_KEY` 换成你自己的）：
+
+| 端点 | `LLM_BASE_URL` | `LLM_MODEL` |
+|---|---|---|
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| 阿里云百炼（DashScope） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+
+本地 vLLM / Ollama 填对应 `base_url`（`LLM_API_KEY` 可留空）。worker 启动时先 preflight `GET /v1/models`，端点不可达或模型不在返回列表里就立刻失败，绝不静默回落 mock。此时横幅变成 `mode=real model=... endpoint=...`。
 
 注意 `--real` 只跑 golden demo，三条云行为不跑，因为 B1/B2 的断言依赖回放带来的确定性时序。
 
@@ -147,9 +157,9 @@ git clone https://github.com/jackkeane/cloudagentperform.git && cd cloudagentper
 
 **有意不实现**（设计里写了、代码里没有，理由是它们不改变本次要展示的判断，只增加体量；逐条的切入点见 `docs/LIMITATIONS.md`）：Temporal 持久化工作流、microVM/gVisor 加固、多租户鉴权、远程 sandbox provider、eval harness、HITL 审批门。验收钉在 CLI 上；单页 Web UI 作为核心完成后的补充项加回（`api/static/index.html`，同一 API、同一事件流、同一运行来源横幅）。
 
-**最弱的一环**，三点：
+**最弱的三处**：
 
-1. **mock 是 step-locked replay**。它按录制顺序吐 tool call，不会根据实时 tool 结果重新决策。所以默认模式能证明的是**平台管道**（调度、隔离、事件、恢复），不能证明 agent 的自适应能力。要看后者只有 `--real`。这是自觉的取舍，不是没意识到。
+1. **mock 是 step-locked replay**。它按录制顺序吐 tool call，不会根据实时 tool 结果重新决策。所以默认模式能证明的是**平台管道**（调度、隔离、事件、恢复），不能证明 agent 的自适应能力。要看后者只有 `--real`。
 2. **真实模型跑通依赖显式的 tool-use 提示词纪律**：一次一个 tool call、tool 调用之间不共享 shell 状态、失败的命令不要原样重试。第一次真实录制就是因为缺这些纪律而失败的。这说明当前循环对小模型的鲁棒性有限，护栏更多来自 prompt 而非结构，换个模型可能要重调。
 3. **SQLite 单写者 + worker 内嵌 Docker 客户端**。单机可用且是对的尺寸，但跨机就不成立：需要换成 Postgres，并把沙箱生命周期交给远程 provider。触发条件和改动点写在 `docs/ARCHITECTURE.md` 的部署映射表里。相关的还有 worker 挂载宿主 `docker.sock`（root 等价权限），它只出现在受信任的平台侧、绝不进入 sandbox 容器，取舍与消除路径同样在架构文档里明写。
 

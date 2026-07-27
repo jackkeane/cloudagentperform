@@ -31,30 +31,30 @@
 
 > 背景：spec 评审期间对判断类决策逐项拷问。Q1 为作者评审 spec 时提出；Q2–Q8 为 2026-07-25 聚焦 grilling（三题：SQLite 选型、bash/白名单信任边界、Mock 默认观感），AI 以面试官口吻提问并给推荐答案，作者逐条确认/修正——作者的新增要求单独标注。分析与文字整理由 AI 辅助（披露见 `docs/AI-USAGE.md`），结论经作者核验后采纳。
 
-### Q1 · 沙盒为什么不用 K8s Pod？（2026-07-25）
+### Q1 · 沙箱为什么不用 K8s Pod？（2026-07-25）
 
-**结论：Pod 买到的是编排能力，不是更强的隔离边界——两者正交。本 demo 用它是过度工程；云上可作平台部署底座，但 raw Pod 直接当沙盒有四类问题。**
+**结论：Pod 买到的是编排能力，不是更强的隔离边界——两者正交。本 demo 用它是过度工程；云上可作平台部署底座，但 raw Pod 直接当沙箱有四类问题。**
 
-1. **隔离强度没有提升，默认攻击面反而更大**。Pod 底下仍是 runc 容器、共享宿主内核，与 Docker 方案同一隔离等级；真正升级要靠 RuntimeClass 切 gVisor/Kata，与"是否用 K8s"无关（Docker 下同样可 `--runtime=runsc`）。而 Pod 开箱默认自动挂载 ServiceAccount token（可达 kube-apiserver）、接入集群网络（可达其他 Pod/Service、cluster DNS、云厂商 metadata 169.254.169.254）；要锁死需逐项配置 `automountServiceAccountToken: false`、restricted PodSecurity、默认拒绝的 NetworkPolicy（且后者依赖 CNI 实现，flannel 不执行）。对比本设计一个 `network=none` 拿到的近零网络面，naive 的 pod-per-job 是更危险的沙盒。
-2. **生命周期错配**。本设计的沙盒模式是"启动一次 → 多轮交互式 exec（带超时、抓退出码）→ 提取 artifact → 销毁"；K8s 原语是 run-to-completion 取向。交互要靠常驻 Pod + `pods/exec` 子资源（SPDY/WebSocket 流），apiserver 进入数据路径；文件进出是 tar over exec（`kubectl cp` 语义，镜像里必须有 tar）。冷启动秒级（调度→kubelet→CNI 配 IP）vs Docker 热镜像百毫秒级，规模化会被迫维护 warm pool——而为保住"每 attempt 全新工作区"语义，池中 Pod 只能一用一销毁，池子的账目/泄漏/补充速率都成新负担。
+1. **隔离强度没有提升，默认攻击面反而更大**。Pod 底下仍是 runc 容器、共享宿主内核，与 Docker 方案同一隔离等级；真正升级要靠 RuntimeClass 切 gVisor/Kata，与"是否用 K8s"无关（Docker 下同样可 `--runtime=runsc`）。而 Pod 开箱默认自动挂载 ServiceAccount token（可达 kube-apiserver）、接入集群网络（可达其他 Pod/Service、cluster DNS、云厂商 metadata 169.254.169.254）；要锁死需逐项配置 `automountServiceAccountToken: false`、restricted PodSecurity、默认拒绝的 NetworkPolicy（且后者依赖 CNI 实现，flannel 不执行）。对比本设计一个 `network=none` 拿到的近零网络面，naive 的 pod-per-job 是更危险的沙箱。
+2. **生命周期错配**。本设计的沙箱模式是"启动一次 → 多轮交互式 exec（带超时、抓退出码）→ 提取 artifact → 销毁"；K8s 原语是 run-to-completion 取向。交互要靠常驻 Pod + `pods/exec` 子资源（SPDY/WebSocket 流），apiserver 进入数据路径；文件进出是 tar over exec（`kubectl cp` 语义，镜像里必须有 tar）。冷启动秒级（调度→kubelet→CNI 配 IP）vs Docker 热镜像百毫秒级，规模化会被迫维护 warm pool——而为保住"每 attempt 全新工作区"语义，池中 Pod 只能一用一销毁，池子的账目/泄漏/补充速率都成新负担。
 3. **控制面 churn**。sandbox-per-task 意味着高频建删 Pod：etcd 写放大、scheduler 压力、CNI IP 频繁分配释放、完成 Pod 需要 GC（TTL 不配就堆积）。K8s 对海量短命 Pod 是出名的不友好——Knative 及各家 sandbox 服务都不做 naive pod-per-request。
 4. **对本 demo 致命**。评审者需先装 kind/minikube、把镜像 load 进集群，"一条命令 `docker compose up`"的验收故事消失；8~12h 预算也装不下。
 
-**承认 Pod 方案的真实优势**（已反映到 ARCHITECTURE.md 部署映射）：a) 权限模型——worker 持 docker.sock 约等于宿主 root，而 K8s 里 worker 只需单个 namespace 的 pods create/delete RBAC，授权面干净得多；b) 策略化——ResourceQuota/PodSecurity/NetworkPolicy 为集群级强制，不依赖每次调用带对 flag，RuntimeClass 一行配置切强运行时。社区侧证：kubernetes-sigs/agent-sandbox（2025 年底立项：Sandbox CRD + warm pool + 强运行时）本质上就是承认 raw Pod 不够、需在其上补一层。
+**承认 Pod 方案的真实优势**（已反映到 ARCHITECTURE.md 部署映射）：a) 权限模型——worker 持 docker.sock 约等于宿主 root，而 K8s 里 worker 只需单个 namespace 的 pods create/delete RBAC，授权面干净得多；b) 策略化——ResourceQuota/PodSecurity/NetworkPolicy 为集群级强制，不依赖每次调用带对 flag，RuntimeClass 一行配置切强运行时。社区旁证：kubernetes-sigs/agent-sandbox（2025 年底立项：Sandbox CRD + warm pool + 强运行时）本质上就是承认 raw Pod 不够、需在其上补一层。
 
-**落点**：部署映射表中 K8s 定位为**平台自身**（API/worker 以 Deployment 运行、HPA 扩缩）的底座；沙盒一行的云上答案仍是 Firecracker/E2B 或 Kata/gVisor Pod，不是 raw Pod。`SandboxProvider` 接口无需任何改动即可容纳 `K8sPodSandboxProvider`（start=建 Pod 等 Ready、exec=`pods/exec`、read/write=tar over exec、download_artifact=同、destroy=删 Pod + label GC），上述 1–3 即该 provider 的实现作业清单——保持 design-only，不实现。
+**落点**：部署映射表中 K8s 定位为**平台自身**（API/worker 以 Deployment 运行、HPA 扩缩）的底座；沙箱一行的云上答案仍是 Firecracker/E2B 或 Kata/gVisor Pod，不是 raw Pod。`SandboxProvider` 接口无需任何改动即可容纳 `K8sPodSandboxProvider`（start=建 Pod 等 Ready、exec=`pods/exec`、read/write=tar over exec、download_artifact=同、destroy=删 Pod + label GC），上述 1–3 即该 provider 的实现作业清单——保持 design-only，不实现。
 
 ### Q2 · 为什么不 Redis-only？（2026-07-25，grilling）
 
 **问**：已有 Redis——任务放 hash、事件放 Streams（`XRANGE` 天然支持 Last-Event-ID 续传）、开 AOF 即持久化。为何引入第二个存储？
 
-**答**：这不是"两个数据库"，是**协调状态**与**事实记录**的分离，两者要求相反。① Redis 里全部是可丢弃可重建的协调状态（队列、lease——价值恰在 TTL 会过期、pubsub——价值恰在即时投递不保存）；SQLite 存必须活得比任何进程久的事实（任务终态、事件历史、transcript），云行为 #1（断连重放）#2（崩溃恢复）的验收全押在"历史绝不丢"。② 耐久等级：SQLite 一次 commit 即落盘；Redis 同等保证需 `appendfsync always`，默认 everysec 有 1 秒丢失窗口——把验收押在"Redis 持久化配对了"上是拿确定性换省一个组件。③ 事务边界：终态写入 + 终态事件追加必须原子（否则出现"succeeded 但无 job.completed 事件"的脏账），SQLite 单事务，Redis 需 MULTI/Lua。④ 可检视性：评审 `sqlite3 data.db` 一条 SELECT 看全部历史。⑤ 叙事红利：**Redis 中无唯一事实，一切可从 SQLite 重建**——两个存储从复杂度负债翻转为故障域隔离。诚实让步：Redis Streams 是合法极简方案，输在事务原子性与事实源唯一。
+**答**：这不是"两个数据库"，是**协调状态**与**事实记录**的分离，两者要求相反。① Redis 里全部是可丢弃可重建的协调状态（队列、lease——价值恰在 TTL 会过期、pubsub——价值恰在即时投递不保存）；SQLite 存必须活得比任何进程久的事实（任务终态、事件历史、transcript），云行为 B1（断连续传）与 B2（崩溃恢复）的验收全押在"历史绝不丢"。② 耐久等级：SQLite 一次 commit 即落盘；Redis 同等保证需 `appendfsync always`，默认 everysec 有 1 秒丢失窗口——把验收押在"Redis 持久化配对了"上是拿确定性换省一个组件。③ 事务边界：终态写入 + 终态事件追加必须原子（否则出现"succeeded 但无 job.completed 事件"的脏账），SQLite 单事务，Redis 需 MULTI/Lua。④ 可检视性：评审 `sqlite3 data.db` 一条 SELECT 看全部历史。⑤ 叙事也更干净：**Redis 中无唯一事实，一切可从 SQLite 重建**——两个存储从复杂度负债翻转为故障域隔离。诚实让步：Redis Streams 是合法极简方案，输在事务原子性与事实源唯一。
 
 ### Q3 · "可从 SQLite 重建"是叙事还是实测行为？（2026-07-25，grilling）
 
 **问**：文档里写一句谁都会。`docker kill redis` 再重启，平台真能恢复队列与在跑任务吗？
 
-**决议：做成真行为，不加第四个演示场景。** ① reconcile 本来就必须存在——lease 过期不会自动触发重入队（Redis key 过期无动作），必须有人扫描 `running` 且无 lease 的任务、CAS 回收 `running→queued` 并重新入队，这是云行为 #2 的触发机制，天然的家在 worker 主循环。② 扩成完整 reconcile 仅 +~10 行（补推 `queued` 但不在 Redis 队列的任务），做完则"Redis 是可重建的派生状态"**构造上成立**——Redis 重启空库与 worker 崩溃走同一恢复路径，零新机制。③ 竞态已被现有设计防住：重复入队无害（认领靠 `SET NX` lease），回收用 CAS 保证单赢家。④ 范围控制（作者要求：**单测必须验证该叙事，断言而非注释**）：集成测试钉死"清空 Redis → reconcile → 队列与在跑任务恢复"；不进 demo.sh——三个云行为已够讲完故事，第四场景留 D3 机动。
+**决议：做成真行为，不加第四个演示场景。** ① reconcile 本来就必须存在——lease 过期不会自动触发重入队（Redis key 过期无动作），必须有人扫描 `running` 且无 lease 的任务、CAS 回收 `running→queued` 并重新入队，这是云行为 B2 的触发机制，理应放在 worker 主循环里。② 扩成完整 reconcile 仅 +~10 行（补推 `queued` 但不在 Redis 队列的任务），做完则"Redis 是可重建的派生状态"**构造上成立**——Redis 重启空库与 worker 崩溃走同一恢复路径，零新机制。③ 竞态已被现有设计防住：重复入队无害（认领靠 `SET NX` lease），回收用 CAS 保证单赢家。④ 范围控制（作者要求：**单测必须验证该叙事，断言而非注释**）：集成测试钉死"清空 Redis → reconcile → 队列与在跑任务恢复"；不进 demo.sh——三个云行为已够讲完故事，第四场景留作机动。
 
 ### Q4 · 跨容器共享 SQLite 是反模式 + 为什么不直接 Postgres？（2026-07-25，grilling）
 
@@ -76,7 +76,7 @@
 
 ### Q7 · Mock 默认：评审从头到尾没见到真 LLM，凭什么信？（2026-07-25，grilling）
 
-**答**：① 先划清 mock 替换了什么：只换"决定下一步"的大脑，不换四肢——队列/lease/状态机、沙箱全生命周期、SSE 持久化续传、取消、并发隔离**全部真实**，`tool_calls` 是录制的但每条命令真的在容器里执行、`report.md` 真的被写出、artifact 真的被晋升（考察点①②④完整真实，mock 只涉③的推理端）。② 大脑真实性三层证据链：**录制原件入库**（`--record` 录制脚本 + 原始 transcript + 模型/日期/vLLM 版本标注）；**同路径一变量切换**（`demo.sh --real` + `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`，任意 OpenAI 兼容端点即插即用；**作者新增**：README 提供「评审自带 key 实测」节，给 DeepSeek/OpenAI/DashScope 复制粘贴示例，评审十秒即可亲手验证）；**真实模式录屏**（D3 机动项）。③ 默认 mock 是为评审设计而非藏拙：评审大概率无 GPU、"10 分钟跑通"是硬约束、三个云行为验收需要确定性。④ 生死线：**绝不伪装**——CLI/事件流/README 三处明示"回放模式（录制自真实运行）"。**连带决议**：为让任意云端点即插即用，tool-calls 钉死 native `tool_calls`（OpenAI 协议标准件），prompt-JSON 备选删除不建；本地 vLLM parser 降为部署侧配置，fixture 录制可用云端点保险（本地 Qwen3 为首选项而非关键路径）。
+**答**：① 先划清 mock 替换了什么：只换"决定下一步"的大脑，不换四肢——队列/lease/状态机、沙箱全生命周期、SSE 持久化续传、取消、并发隔离**全部真实**，`tool_calls` 是录制的但每条命令真的在容器里执行、`report.md` 真的被写出、artifact 真的被晋升（考察点①②④完整真实，mock 只涉③的推理端）。② 大脑真实性三层证据链：**录制原件入库**（`--record` 录制脚本 + 原始 transcript + 模型/日期/vLLM 版本标注）；**同路径一变量切换**（`demo.sh --real` + `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`，任意 OpenAI 兼容端点即插即用；**作者新增**：README 提供「评审自带 key 实测」节，给 DeepSeek/OpenAI/DashScope 复制粘贴示例，评审十秒即可亲手验证）；**真实模式录屏**（已交付：`docs/demo-real.cast`）。③ 默认 mock 是为评审设计而非藏拙：评审大概率无 GPU、"10 分钟跑通"是硬约束、三个云行为验收需要确定性。④ 底线：**绝不伪装**——CLI/事件流/README 三处明示"回放模式（录制自真实运行）"。**连带决议**：为让任意云端点即插即用，tool-calls 钉死 native `tool_calls`（OpenAI 协议标准件），prompt-JSON 备选删除不建；本地 vLLM parser 降为部署侧配置，fixture 录制可用云端点保险（本地 Qwen3 为首选项而非关键路径）。
 
 ### Q8 · 为什么不"默认真实、探测失败自动回落 mock"？（2026-07-25，grilling）
 

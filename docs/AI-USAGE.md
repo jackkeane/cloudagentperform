@@ -12,7 +12,7 @@
 | Claude Code | Fable 5 | 收尾阶段主控（真实录制失败的根因修复、VERIFICATION/LIMITATIONS 撰写、勘误与交付自查）与交付前整分支复审 | 未参与前期设计决策 |
 | Claude Code subagent | Opus/Sonnet 5 | 实现 lane（queuebus、worker、API、e2e）、README/ARCHITECTURE 与 ADR 起草、Web UI | 未用于 sandbox 加固等安全相关代码 |
 | grok build（headless CLI） | grok-code | 5 个纯单元测试 lane（store / llm / loop / cli / record），零网络零 docker | 未参与任何设计决策；产出由我机械校验 |
-| grok（独立会话） | grok-4 | 对设计 spec 做一次独立复核，扮演反方 | 未直接写入仓库，复核意见由我逐条裁决 |
+| grok（独立会话） | grok-4.5 | 对设计 spec 与技术选型各做一次独立复核，扮演反方 | 未直接写入仓库，复核意见由我逐条裁决 |
 
 分工原则：**决策与验收标准我定，键入交给 AI，安全与环境相关的代码用更强的模型并由我逐行读**。
 
@@ -25,7 +25,7 @@
 - 八个架构判断题的答案，全部经过一轮对抗式追问后由我拍板，过程原样存档在 `docs/DECISIONS.md`
   Q1–Q8（K8s Pod 做沙箱的问题、为什么不 Redis-only、SQLite vs Postgres、bash 与 allowlist 的
   信任边界、四个工具的最小完备集、mock 的证据链、禁止静默降级）。
-- 三条"云语义"验收行为（断连重放 / 杀 worker 后重跑 / 并发隔离），以及"它们必须由 `demo.sh`
+- 三条"云语义"验收行为（断连续传 / 杀 worker 后重跑 / 并发隔离），以及"它们必须由 `demo.sh`
   真跑而不是写在文档里"这个要求。
 - 两条硬性要求由我提出，AI 起初都没有想到：
   1. **demo 要暴露 OpenAI 兼容接口，让面试官能用自己的 key 直接验证**（`./demo.sh --real`）；
@@ -38,7 +38,7 @@
 
 - 把上述决策展开成 16 个任务的 TDD 实现计划，再按计划写测试与实现。
 - 绝大部分代码键入与全部文档初稿的中文行文。
-- 一次独立复核（扮演反方挑设计的毛病）。
+- 两次独立复核（扮演反方挑设计与选型的毛病）。
 
 ## 三、关键 prompt（原文）与我对产出的处置
 
@@ -49,7 +49,7 @@
 > 关于沙盒，如果用k8s的pod做会有什么问题？
 
 产出被我保留并归档为 `DECISIONS.md` Q1。**改动**：AI 初稿只列 K8s 的缺点，我要求它同时列出
-K8s 明确优于 Docker 的两点（多机调度、与云原生生态的对接），否则这份对比是自我辩护而不是权衡；
+K8s 明确优于 Docker 的两点（权限模型与策略化，见 `DECISIONS.md` Q1「承认 Pod 方案的真实优势」段），否则这份对比是自我辩护而不是权衡；
 最终结论是 `K8sPodSandboxProvider` 作为 design-only 映射写进架构文档。
 
 **2. 让评审者能自证，而不是只能相信我**
@@ -98,7 +98,7 @@ AI 原本打算在 provider 里做"真实端点不可用就自动回落 mock"。
    （含真起 Docker 容器的沙箱测试）：`.venv/bin/python -m pytest`。
 2. **grok lane 的机械校验（不靠信任）。** 交付物我逐项核对：文件集合是否与派工完全一致、
    测试函数名是否与计划中的契约逐字相同、关键约束是否存在（例如 CAS 的 attempt 守卫、
-   `EVENT_TYPES` 断言、hash pin、Bearer 头），并把实现 diff against 计划原文，防止它悄悄
+   `EVENT_TYPES` 断言、hash pin、Bearer 头），并把实现与计划原文做 diff 对照，防止它悄悄
    放宽测试。有一次它在错误的工作目录执行提交，被这一步拦下。
 3. **真实探针，不靠文档假设。** vLLM 的原生 tool call 能力用两次请求确认：带
    `--enable-auto-tool-choice --tool-call-parser hermes` 时返回 `finish_reason=tool_calls`，
@@ -121,7 +121,7 @@ AI 原本打算在 provider 里做"真实端点不可用就自动回落 mock"。
 ## 五、可核对的痕迹
 
 - 架构拷问全过程：`docs/DECISIONS.md`（Q1–Q8，含被我推翻的中间结论）
-- 实现计划：`docs/plans/2026-07-25-cloud-agent-platform.md`
+- 实现计划（骨架版；原版含逐任务内嵌契约测试与实现代码，完整保留在 git 历史）：`docs/plans/2026-07-25-cloud-agent-platform.md`
 - 决策/文档提交早于对应实现提交，git history 可验证独立思考顺序
 - AI 协助的提交带 `Assisted-by:` trailer。该 trailer 是仓库统一的协助标记，**不代表具体型号**；
   每个 lane 实际用了哪个模型以第一节的表格为准。

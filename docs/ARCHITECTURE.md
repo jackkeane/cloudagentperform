@@ -64,7 +64,7 @@ queued ──claim (CAS)──> running ──finish (CAS)──> succeeded | fa
 
 **为什么先落库再流**。`store.append_event()` 先 INSERT 拿到自增 id，`bus.publish_event()` 才发 pubsub。顺序反过来的话，订阅者会先看到一个数据库里还不存在的 id，断线后按 `id > Last-Event-ID` 拉历史会拉空，那条事件永久消失。pubsub 是不保存的即时通道，它不承担持久性，只承担延迟。
 
-**subscribe-then-replay 的交接顺序**。`api/main.py` 的 `_stream()` 先 `SUBSCRIBE` 频道，**再**读 `store.events_after(task_id, after)`。反过来（先读历史后订阅）的话，两步之间产生的事件既不在历史里也不在订阅里，是一个静默丢事件的窗口。先订阅则最坏只是重复。
+**subscribe-then-replay 的交接顺序**。`api/main.py` 的 `_stream()` 先 `SUBSCRIBE` 频道，**再**读 `store.events_after(task_id, after)`。反过来（先读历史后订阅）的话，两步之间产生的事件既不在历史里也不在订阅里，是一个静默丢事件的窗口。先订阅则最坏只是重复投递（由下一段的去重收掉）。
 
 **去重**。历史阶段记下最后一个 id（`seen`），进入实时循环后 `data["id"] <= seen` 一律丢弃，交接窗口的重叠部分被吃掉。
 
@@ -144,13 +144,13 @@ queued ──claim (CAS)──> running ──finish (CAS)──> succeeded | fa
    - `describe() -> dict`，必须给出 `mode` / `model` / `base_url`。这是运行来源横幅、`job.started` payload 和 transcript 头的唯一数据源，不可省略。
    - `chat(messages, tools) -> ChatResult`，`tool_calls` 用 `ToolCall(id, name, arguments, parse_error)`。畸形 JSON 不要抛异常，填 `parse_error`，循环会把它当作可自救的工具错误回给模型。
 2. 在 `worker/main.py: make_llm_factory()` 里按 `cfg.llm_mode` 加一个分支；需要新配置就加到 `core/config.py` 的 `Config` 与 `load_config()`。
-3. 若有连通性前置检查，实现一个 `preflight()` 并在 factory 里调用，保持 fail fast、不静默回落的规矩（DECISIONS.md Q8）。
+3. 若有连通性前置检查，实现一个 `preflight()` 并在 factory 里调用，保持 fail-fast、不静默回落的规矩（DECISIONS.md Q8）。
 
 测试模板：`tests/test_llm.py`，用 httpx 的 `MockTransport` 打协议层，不联网。
 
 ### 加一个 sandbox provider
 
 1. 实现 `sandbox/provider.py` 的两个抽象类：`SandboxProvider`（`start(task_id, attempt, workspace_src)` / `gc(active_task_ids)` / `remove_for_task(task_id)`）与 `SandboxHandle`（`exec` / `write_file` / `read_file` / `download_artifacts` / `destroy` / `oom_killed`）。
-2. 在 `worker/main.py: main()` 里加分派分支。当前 `sandbox_backend`（环境变量 `CAP_SANDBOX`）只认 `docker`，配成其它值时 worker 启动即报错退出并指向本节——fail fast，不猜测；加第二个 provider 时把该守卫改成真正的分派即可。
+2. 在 `worker/main.py: main()` 里加分派分支。当前 `sandbox_backend`（环境变量 `CAP_SANDBOX`）只认 `docker`，配成其它值时 worker 启动即报错退出并指向本节——fail-fast，不猜测；加第二个 provider 时把该守卫改成真正的分派即可。
 3. 语义约束（不满足会破坏现有验收）：`start` 必须交付干净的 `/workspace` 与 `/workspace/output/`；`destroy` 必须幂等且在任何路径下可调用；实例必须带上 `cap.task_id` 与 `cap.attempt` 标识，否则 `gc` 与并发隔离的验收（数 label）失效；`exec` 在实例已消失时要抛 `SandboxDied`，这是取消与超时的中断机制所依赖的信号。
 4. 测试模板：`tests/test_docker_sandbox.py` 是真起容器的集成测试。

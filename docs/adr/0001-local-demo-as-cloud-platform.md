@@ -8,7 +8,7 @@
 
 ## 决策
 云是架构属性，不是部署位置：执行与客户端解耦、进程死亡可恢复、任务间隔离、水平扩展路径清晰。用三条可复现的"云行为"作为验收测试，`demo.sh` 实际跑通而非仅描述：
-- B1 断连重放：CLI 提交后杀掉客户端，重新 `follow` 时历史事件从 SQLite 完整回放再续接实时流（中途断线时 CLI 携带 `Last-Event-ID` 增量续传，`cli/main.py` 的 `follow_events`）。
+- B1 断连续传：CLI 提交后杀掉客户端，重新 `follow` 时历史事件从 SQLite 完整回放再续接实时流（中途断线时 CLI 携带 `Last-Event-ID` 增量续传，`cli/main.py` 的 `follow_events`）。
 - B2 worker 崩溃恢复：运行中 `docker compose kill worker`，lease 过期后任务以 attempt=2 从头重跑至完成。
 - B3 并发隔离：两个任务同时提交，各自独立 Docker 沙箱、独立事件流。
 `ARCHITECTURE.md` 另附部署映射表（API→无状态容器组，Redis→托管 Redis，worker→自动扩缩池，Docker 沙箱→Firecracker/E2B，SQLite→Postgres），说明同一套 compose 栈原样可上云。

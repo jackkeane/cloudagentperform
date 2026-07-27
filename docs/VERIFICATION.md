@@ -58,7 +58,7 @@ docker run --rm --memory 512m --memory-swap 512m cap-sandbox \
 .venv/bin/python -m pytest tests/test_reconcile.py::test_redis_wipe_recovers_queue_and_running_tasks -v
 ```
 
-## 5. 断连不丢历史（云行为 B1）
+## 5. 断连续传：历史不丢（云行为 B1）
 
 - **假设**：事件先落库再流出，客户端死掉再重连能完整回放并续接实时流。
 - **检查**：`demo.sh` 杀掉跟随中的 CLI，重新 `follow` 后断言历史第一条（`attempt 1 started`）与终态都在；SSE 层面另有全量回放与 `Last-Event-ID` 续传的单测，CLI 断线重连携带 last id 也有单测锁定。
